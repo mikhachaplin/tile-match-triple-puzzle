@@ -87,7 +87,9 @@ function calcSizes(){
   // Vertical rectangle tiles
   TW=Math.min((SW-40)/5, FIELD_H*0.22);
   TH=TW*1.35;
-  SLOT_W=TW*0.92;SLOT_H=TH*0.85;
+  // Shelf slots: must fit max 8 across the screen width
+  SLOT_W=Math.min(TW*0.92, (SW-20)/8-4);
+  SLOT_H=SLOT_W/0.92*1.35*0.85;
   GRID_GAP_X=Math.max(TW*0.2,12);
   GRID_GAP_Y=Math.max(TH*0.15,10);
   // Reset pan/zoom
@@ -162,9 +164,10 @@ document.addEventListener('wheel',function(e){
 
 function applyPanZoom(){
   if(!fieldInner)return;
+  var ft=TOP_H+BBAR_H;
   fieldInner.scale.set(panZoom.scale);
   fieldInner.x=panZoom.x*panZoom.scale;
-  fieldInner.y=panZoom.y*panZoom.scale;
+  fieldInner.y=ft+panZoom.y*panZoom.scale;
 }
 
 // ===== EDITOR =====
@@ -374,10 +377,10 @@ function rebuildPlayScreen(){
     var btn=makeButton(b.text,b.color,bbw,bbh,b.fn);btn.x=startX+i*(bbw+4);btn.y=TOP_H+4;topBar.addChild(btn);
   });
 
-  // ===== FIELD BG (clipped) =====
+  // ===== FIELD BG (static, behind pan/zoom) =====
   var ft=TOP_H+BBAR_H;
-  var fbg=new PIXI.Graphics();fbg.beginFill(0xF5F0E8);fbg.drawRoundedRect(0,0,SW,FIELD_H,0);fbg.endFill();
-  fbg.y=ft;fieldContainer.addChild(fbg); // bg is outside fieldInner so it doesn't pan
+  var fbg=new PIXI.Graphics();fbg.beginFill(0xF5F0E8);fbg.drawRect(0,ft,SW,FIELD_H);fbg.endFill();
+  stage.addChild(fbg); // behind everything, at y=ft
 
   // ===== FIELD INNER (pan/zoom content) =====
   var activeTiles=tiles.filter(function(t){return!t.removed});
