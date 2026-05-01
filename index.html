@@ -278,10 +278,18 @@ function isBlocked(tile){
   for(var i=0;i<tiles.length;i++){
     var t=tiles[i];if(t===tile||t.removed)continue;
     if(t.layer<=tile.layer)continue;
-    var ax=tile.col*tileSize*0.95+tile.ox;
-    var ay=tile.row*tileSize*0.85+tile.oy;
-    var bx=t.col*tileSize*0.95+t.ox;
-    var by=t.row*tileSize*0.85+t.oy;
+    // Используем реальные координаты спрайтов если есть
+    var ax,ay,bx,by;
+    if(tile.sprite&&t.sprite){
+      ax=tile.sprite.getGlobalPosition?tile.sprite.x:tile.col*tileSize*0.95+tile.ox;
+      ay=tile.sprite.getGlobalPosition?tile.sprite.y:tile.row*tileSize*0.85+tile.oy;
+      bx=t.sprite.x;by=t.sprite.y;
+    }else{
+      ax=tile.col*tileSize*0.95+tile.ox;
+      ay=tile.row*tileSize*0.85+tile.oy;
+      bx=t.col*tileSize*0.95+t.ox;
+      by=t.row*tileSize*0.85+t.oy;
+    }
     if(Math.abs(ax-bx)<tileSize*0.8&&Math.abs(ay-by)<tileSize*0.8)return true;
   }
   return false;
@@ -308,6 +316,25 @@ function checkLose(){
 function checkWin(){
   var remaining=tiles.filter(function(t){return!t.removed}).length;
   if(remaining===0){screenState='win';drawWin()}
+}
+function updateBlockedStates(){
+  // Обновляем визуальное состояние всех оставшихся плиток
+  var activeTiles=tiles.filter(function(t){return!t.removed});
+  activeTiles.forEach(function(tile){
+    var blocked=isBlocked(tile);
+    if(tile.sprite){
+      tile.sprite.alpha=blocked?0.55:1;
+      tile.sprite._blocked=blocked;
+      if(blocked){
+        tile.sprite.eventMode='none';tile.sprite.cursor='default';
+      }else{
+        tile.sprite.eventMode='static';tile.sprite.cursor='pointer';
+        // Убираем старые обработчики и ставим новый
+        tile.sprite.removeAllListeners();
+        tile.sprite.on('pointerdown',function(){onTileClick(tile)});
+      }
+    }
+  });
 }
 
 // ===== BOOSTERS =====
@@ -368,7 +395,9 @@ function onTileClick(tile){
   sp.x=tile.sprite.x;sp.y=tile.sprite.y;
   sp.width=tileSize;sp.height=tileSize;
   sp.scale.set(1);
-  fieldContainer.addChild(sp);
+  // Добавляем на flyLayer (самый верхний z-index) чтобы летела НАД полкой
+  var flyLayer=stage.children.find(function(c){return c._isFlyLayer});
+  if(flyLayer)flyLayer.addChild(sp);else stage.addChild(sp);
   tile.sprite.visible=false;
   var targetX=slotIdx*slotSize*1.05+(SW-maxShelf*slotSize*1.05)/2;
   var targetY=SH-shelfH+slotSize*0.1;
@@ -378,8 +407,10 @@ function onTileClick(tile){
     shelfItems[slotIdx]=sp;
     sp.x=targetX;sp.y=targetY;
     shelfContainer.addChild(sp);
-    fieldContainer.removeChild(sp);
+    if(flyLayer)flyLayer.removeChild(sp);else stage.removeChild(sp);
     animating=false;
+    // Пересчитываем blocked для оставшихся плиток
+    updateBlockedStates();
     checkTriple();
     setTimeout(function(){checkLose()},350);
   });
@@ -428,21 +459,24 @@ function rebuildVisuals(){
   if(uiContainer)uiContainer.removeChildren();
   stage.removeChild(fieldContainer);stage.removeChild(shelfContainer);stage.removeChild(uiContainer);
   fieldContainer=new PIXI.Container();shelfContainer=new PIXI.Container();uiContainer=new PIXI.Container();
-  stage.addChild(fieldContainer);stage.addChild(shelfContainer);stage.addChild(uiContainer);
-  // field bg
+  // Правильный z-order: field → ui → shelf → flyLayer (сверху)
+  var flyLayer=new PIXI.Container();flyLayer._isFlyLayer=true;
+  stage.addChild(fieldContainer);stage.addChild(shelfContainer);stage.addChild(uiContainer);stage.addChild(flyLayer);
+  // field bg — начинаем ниже (с отступом сверху)
   var fbg=new PIXI.Graphics();
-  fbg.beginFill(0xF5F0E8);fbg.drawRoundedRect(SW*0.02,0,SW*0.96,fieldH,12);fbg.endFill();
+  fbg.beginFill(0xF5F0E8);fbg.drawRoundedRect(SW*0.02,8,SW*0.96,fieldH-8,12);fbg.endFill();
   fieldContainer.addChild(fbg);
   // tiles
   var activeTiles=tiles.filter(function(t){return!t.removed});
   var cols=Math.floor(SW/(tileSize*0.95));
   var totalW=cols*tileSize*0.95;
   var offsetX=(SW-totalW)/2;
+  var fieldOffsetY=12; // Отступ сверху чтобы не перекрывать
   activeTiles.forEach(function(tile){
     var blocked=isBlocked(tile);
     var sp=makeTileSprite(tile.type,blocked);
     sp.x=tile.col*tileSize*0.95+tile.ox+offsetX;
-    sp.y=tile.row*tileSize*0.85+tile.oy+10;
+    sp.y=tile.row*tileSize*0.85+tile.oy+fieldOffsetY;
     sp.width=tileSize;sp.height=tileSize;sp.scale.set(1);
     if(!blocked){
       sp.eventMode='static';sp.cursor='pointer';
@@ -497,12 +531,12 @@ function drawUI(){
   });
   var st=new PIXI.Text('Score: '+score,{fontSize:Math.min(SW*0.05,20),fill:0xFFFFFF,fontWeight:'bold'});
   st.x=SW/2;st.y=by+bh+8;st.anchor.set(0.5,0);uiContainer.addChild(st);
-  // pause btn
+  // pause btn — справа в зоне бустеров (не перекрывает поле)
   var pb=makeButton('⏸',0x7F8C8D,bh,bh,function(){drawMenu()});
-  pb.x=SW-bh-8;pb.y=8;uiContainer.addChild(pb);
-  // editor btn
+  pb.x=SW-bh-8;pb.y=by;uiContainer.addChild(pb);
+  // editor btn — слева в зоне бустеров (не перекрывает поле)
   var eb=makeButton('🔧',0x555555,bh,bh,function(){toggleEditor()});
-  eb.x=8;eb.y=8;uiContainer.addChild(eb);
+  eb.x=8;eb.y=by;uiContainer.addChild(eb);
 }
 function updateScore(){
   var st=uiContainer&&uiContainer.children&&uiContainer.children.find(function(c){return c instanceof PIXI.Text});
