@@ -56,11 +56,15 @@ var score=0,level=1,maxShelf=7;
 var undoStack=[];
 var levelConfig={types:8,layers:2,perType:6,boosters:3};
 var boosterCounts={undo:3,shuffle:3,extraSlot:3,hint:3};
-var topBar,fieldContainer,shelfContainer,flyLayer;
+var fieldContainer,shelfContainer,flyLayer,topBar;
 var animating=false;
 var confettiParticles=[];
-var SW,SH,tileSize,slotSize;
+var SW,SH;
+// Tile dimensions — vertical rectangles
+var TW,TH; // tile width/height
+var SLOT_W,SLOT_H; // shelf slot dimensions
 var TOP_H,FIELD_H,SHELF_H;
+var GRID_GAP; // gap between stacks
 
 // ===== PIXI INIT =====
 app=new PIXI.Application({width:window.innerWidth,height:window.innerHeight,backgroundColor:0x000000,resolution:window.devicePixelRatio||1,autoDensity:true});
@@ -70,11 +74,17 @@ stage.sortableChildren=true;
 
 function calcSizes(){
   SW=window.innerWidth;SH=window.innerHeight;
-  TOP_H=Math.max(SH*0.08,44);
-  SHELF_H=Math.max(SH*0.15,60);
+  TOP_H=Math.max(SH*0.07,38);
+  SHELF_H=Math.max(SH*0.16,64);
   FIELD_H=SH-TOP_H-SHELF_H;
-  tileSize=Math.min((SW-20)/7,FIELD_H/6);
-  slotSize=Math.min((SW-20)/8,SHELF_H*0.8);
+  // Vertical rectangle tiles: width=1, height=1.35
+  // Fit max 5 columns with gaps
+  GRID_GAP=Math.max(SW*0.03,8);
+  TW=Math.min((SW-GRID_GAP*6)/5, FIELD_H/6*0.75);
+  TH=TW*1.35;
+  // If too tall, constrain by field height
+  if(TH*5>FIELD_H*0.9){TH=FIELD_H*0.18;TW=TH/1.35}
+  SLOT_W=TW*0.95;SLOT_H=TH*0.9;
 }
 calcSizes();
 
@@ -90,42 +100,33 @@ window.addEventListener('resize',function(){
 // ===== EDITOR =====
 function toggleEditor(){var p=document.getElementById('editor-panel');p.style.display=p.style.display==='none'?'block':'none'}
 document.addEventListener('keydown',function(e){if(e.key==='e'||e.key==='E')toggleEditor()});
-['types','layers','pertype','boosters'].forEach(function(k){
-  var sl=document.getElementById('sl-'+k);
-  sl.oninput=function(){document.getElementById('val-'+k).textContent=this.value};
-});
-function applyEditor(){
-  levelConfig.types=+document.getElementById('sl-types').value;
-  levelConfig.layers=+document.getElementById('sl-layers').value;
-  levelConfig.perType=+document.getElementById('sl-pertype').value;
-  levelConfig.boosters=+document.getElementById('sl-boosters').value;
-  boosterCounts={undo:levelConfig.boosters,shuffle:levelConfig.boosters,extraSlot:levelConfig.boosters,hint:levelConfig.boosters};
-  toggleEditor();startGame();
-}
+['types','layers','pertype','boosters'].forEach(function(k){var sl=document.getElementById('sl-'+k);sl.oninput=function(){document.getElementById('val-'+k).textContent=this.value}});
+function applyEditor(){levelConfig.types=+document.getElementById('sl-types').value;levelConfig.layers=+document.getElementById('sl-layers').value;levelConfig.perType=+document.getElementById('sl-pertype').value;levelConfig.boosters=+document.getElementById('sl-boosters').value;boosterCounts={undo:levelConfig.boosters,shuffle:levelConfig.boosters,extraSlot:levelConfig.boosters,hint:levelConfig.boosters};toggleEditor();startGame()}
 function exportJSON(){var b=new Blob([JSON.stringify(levelConfig,null,2)],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tile-match-config.json';a.click()}
 function importJSON(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(ev){levelConfig=JSON.parse(ev.target.result);applyEditor()};r.readAsText(f)}
 
 // ===== SPRITE HELPERS =====
-function makeTileSprite(type,blocked,scale){
-  var s=scale||1;
+function makeTileSprite(type,blocked,w,h){
   var c=new PIXI.Container();
   var g=new PIXI.Graphics();
   var color=PIXI.utils.string2hex(COLORS[type]);
-  var sz=tileSize*s;
-  g.beginFill(0x000000,0.2);g.drawRoundedRect(2,2,sz,sz,sz*0.15);g.endFill();
-  g.beginFill(color);g.drawRoundedRect(0,0,sz,sz,sz*0.15);g.endFill();
-  g.beginFill(0xFFFFFF,0.18);g.drawRoundedRect(2,2,sz-4,sz*0.3,sz*0.12);g.endFill();
+  // shadow
+  g.beginFill(0x000000,0.2);g.drawRoundedRect(2,2,w,h,w*0.12);g.endFill();
+  // body
+  g.beginFill(color);g.drawRoundedRect(0,0,w,h,w*0.12);g.endFill();
+  // highlight
+  g.beginFill(0xFFFFFF,0.18);g.drawRoundedRect(3,3,w-6,h*0.28,w*0.1);g.endFill();
   c.addChild(g);
-  var t=new PIXI.Text(EMOJIS[type],{fontSize:sz*0.5});t.anchor.set(0.5);t.x=sz/2;t.y=sz/2;c.addChild(t);
+  var t=new PIXI.Text(EMOJIS[type],{fontSize:Math.min(w,h)*0.4});
+  t.anchor.set(0.5);t.x=w/2;t.y=h/2;c.addChild(t);
   c.alpha=blocked?0.5:1;
   c._tileType=type;c._blocked=blocked;
+  c._w=w;c._h=h;
   return c;
 }
 function makeSlotSprite(){
   var c=new PIXI.Container();
-  var g=new PIXI.Graphics();
-  g.lineStyle(2,0xFFFFFF,0.35);g.drawRoundedRect(0,0,slotSize,slotSize,slotSize*0.15);
-  c.addChild(g);return c;
+  var g=new PIXI.Graphics();g.lineStyle(2,0xFFFFFF,0.35);g.drawRoundedRect(0,0,SLOT_W,SLOT_H,SLOT_W*0.12);c.addChild(g);return c;
 }
 function makeButton(text,color,w,h,cb){
   var c=new PIXI.Container();c.eventMode='static';c.cursor='pointer';
@@ -147,43 +148,37 @@ function animateScale(obj,from,to,dur,cb){
   function tick(){var t=Math.min((performance.now()-s)/dur,1);obj.scale.set(from+(to-from)*easeOutBack(t));if(t<1)requestAnimationFrame(tick);else{obj.scale.set(to);if(cb)cb()}}
   requestAnimationFrame(tick);
 }
-function animateAlpha(obj,from,to,dur,cb){
-  var s=performance.now();
-  function tick(){var t=Math.min((performance.now()-s)/dur,1);obj.alpha=from+(to-from)*t;if(t<1)requestAnimationFrame(tick);else{obj.alpha=to;if(cb)cb()}}
-  requestAnimationFrame(tick);
-}
-function animateShake(obj,cb){
-  var ox=obj.x;var i=0;var steps=6;var dx=5;
-  function step(){if(i>=steps){obj.x=ox;if(cb)cb();return}obj.x=ox+(i%2===0?dx:-dx);i++;setTimeout(step,40)}
-  step();
-}
+function animateShake(obj,cb){var ox=obj.x;var i=0;function step(){if(i>=6){obj.x=ox;if(cb)cb();return}obj.x=ox+(i%2===0?5:-5);i++;setTimeout(step,40)}step()}
+function animatePulse(obj){if(obj._pulsing)return;obj._pulsing=true;var s=performance.now();function tick(){if(!obj._pulsing)return;var t=((performance.now()-s)%600)/600;obj.scale.set(1+0.1*Math.sin(t*Math.PI*2));requestAnimationFrame(tick)}requestAnimationFrame(tick)}
+function stopPulse(obj){obj._pulsing=false;obj.scale.set(1)}
+
+// Triple match: shrink to center of each slot
 function animateTripleMatch(sprites,cb){
-  var s=performance.now();var dur=350;
+  var dur=350;var s=performance.now();
+  // Remember original anchor positions
+  var anchors=sprites.map(function(sp){return{x:sp.x,y:sp.y,w:sp._w||SLOT_W,h:sp._h||SLOT_H}});
   function tick(){
     var t=Math.min((performance.now()-s)/dur,1);
-    var sc=t<0.25?1+0.25*easeOutCubic(t/0.25):1.25*(1-easeOutCubic((t-0.25)/0.75));
-    sprites.forEach(function(sp){sp.scale.set(sc);sp.alpha=1-t});
+    var sc=t<0.2?1+0.15*(t/0.2):1.15*(1-easeOutCubic((t-0.2)/0.8));
+    sprites.forEach(function(sp,i){
+      // Scale from center: adjust position so center stays fixed
+      var a=anchors[i];
+      var cx=a.x+a.w/2;var cy=a.y+a.h/2;
+      sp.scale.set(sc);
+      sp.x=cx-(a.w*sc)/2;sp.y=cy-(a.h*sc)/2;
+      sp.alpha=1-t;
+    });
     if(t<1)requestAnimationFrame(tick);
     else{sprites.forEach(function(sp){sp.parent&&sp.parent.removeChild(sp)});if(cb)cb()}
   }
   requestAnimationFrame(tick);
 }
-function animatePulse(obj){
-  if(obj._pulsing)return;obj._pulsing=true;var s=performance.now();
-  function tick(){if(!obj._pulsing)return;var t=((performance.now()-s)%600)/600;obj.scale.set(1+0.1*Math.sin(t*Math.PI*2));requestAnimationFrame(tick)}
-  requestAnimationFrame(tick);
-}
-function stopPulse(obj){obj._pulsing=false;obj.scale.set(1)}
 
 // ===== CONFETTI =====
 function spawnConfetti(){
   confettiParticles.forEach(function(p){p.parent&&p.parent.removeChild(p)});confettiParticles=[];
   var cls=[0xE74C3C,0x3498DB,0x2ECC71,0xF1C40F,0x9B59B6,0xE91E63,0xFF9800];
-  for(var i=0;i<40;i++){
-    var g=new PIXI.Graphics();g.beginFill(cls[Math.floor(Math.random()*cls.length)]);g.drawRoundedRect(0,0,8,8,2);g.endFill();
-    g.x=SW*Math.random();g.y=-20-Math.random()*100;g._vx=(Math.random()-0.5)*4;g._vy=Math.random()*3+2;g._rot=Math.random()*0.2-0.1;
-    stage.addChild(g);confettiParticles.push(g);
-  }
+  for(var i=0;i<40;i++){var g=new PIXI.Graphics();g.beginFill(cls[Math.floor(Math.random()*cls.length)]);g.drawRoundedRect(0,0,8,8,2);g.endFill();g.x=SW*Math.random();g.y=-20-Math.random()*100;g._vx=(Math.random()-0.5)*4;g._vy=Math.random()*3+2;g._rot=Math.random()*0.2-0.1;stage.addChild(g);confettiParticles.push(g)}
 }
 app.ticker.add(function(){if(screenState==='win')confettiParticles.forEach(function(p){p.x+=p._vx;p.y+=p._vy;p._vy+=0.1;p.rotation+=p._rot;if(p.y>SH+20)p._vy=-Math.abs(p._vy)*0.3})});
 
@@ -192,7 +187,8 @@ function generateTiles(){
   tiles=[];var total=levelConfig.types*levelConfig.perType;
   var types=[];for(var t=0;t<levelConfig.types;t++)for(var j=0;j<levelConfig.perType;j++)types.push(t);
   for(var i=types.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var tmp=types[i];types[i]=types[j];types[j]=tmp}
-  var cols=Math.min(Math.floor(SW/(tileSize*1.1)),8);
+  // Calculate grid: max 5 columns
+  var cols=Math.min(Math.floor((SW-GRID_GAP*2)/(TW+GRID_GAP)),5);
   var idx=0;
   for(var layer=0;layer<levelConfig.layers;layer++){
     var count=Math.ceil(total/levelConfig.layers);
@@ -203,22 +199,30 @@ function generateTiles(){
     }
   }
 }
+
+function getStackX(col){return col*(TW+GRID_GAP)+GRID_GAP}
+function getStackY(row,fieldTop){return row*(TH*0.75+GRID_GAP)+fieldTop+GRID_GAP}
+// Layer offset: small shift for 3D effect
+function getLayerOffX(layer){return layer*3}
+function getLayerOffY(layer){return -layer*4}
+
 function isBlocked(tile){
   for(var i=0;i<tiles.length;i++){
     var t=tiles[i];if(t===tile||t.removed||t.layer<=tile.layer)continue;
-    // Check overlap: tiles in different grid cells should NOT block each other
-    // Only block if in same or adjacent cell AND higher layer overlaps
-    var dc=Math.abs(tile.col-t.col);var dr=Math.abs(tile.row-t.row);
-    if(dc>1||dr>1)continue; // too far apart
-    // Fine check: do their rendered positions overlap?
-    var tileX=getTileX(tile);var tileY=getTileY(tile);
-    var tX=getTileX(t);var tY=getTileY(t);
-    if(Math.abs(tileX-tX)<tileSize*0.7&&Math.abs(tileY-tY)<tileSize*0.7)return true;
+    // Only check adjacent columns/rows
+    if(Math.abs(tile.col-t.col)>1||Math.abs(tile.row-t.row)>1)continue;
+    // Fine position check
+    var ft=getFieldTop();
+    var ax=getStackX(tile.col)+getLayerOffX(tile.layer);
+    var ay=getStackY(tile.row,ft)+getLayerOffY(tile.layer);
+    var bx=getStackX(t.col)+getLayerOffX(t.layer);
+    var by=getStackY(t.row,ft)+getLayerOffY(t.layer);
+    if(Math.abs(ax-bx)<TW*0.75&&Math.abs(ay-by)<TH*0.75)return true;
   }
   return false;
 }
-function getTileX(tile){return tile.col*tileSize*1.1+tileSize*0.05*tile.layer}
-function getTileY(tile){return tile.row*tileSize*0.9-tileSize*0.06*tile.layer}
+
+function getFieldTop(){return TOP_H+Math.max(SH*0.06,36)+4}
 
 function checkTriple(){
   for(var t=0;t<10;t++){
@@ -240,8 +244,7 @@ function boosterUndo(){if(boosterCounts.undo<=0||undoStack.length===0)return;boo
 function boosterShuffle(){if(boosterCounts.shuffle<=0)return;boosterCounts.shuffle--;var rem=tiles.filter(function(t){return!t.removed});var types=rem.map(function(t){return t.type});for(var i=types.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var tmp=types[i];types[i]=types[j];types[j]=tmp}rem.forEach(function(t,i){t.type=types[i]});rebuildPlayScreen()}
 function boosterExtraSlot(){if(boosterCounts.extraSlot<=0)return;boosterCounts.extraSlot--;maxShelf=8;rebuildPlayScreen()}
 function boosterHint(){
-  if(boosterCounts.hint<=0)return;boosterCounts.hint--;
-  var found=null;
+  if(boosterCounts.hint<=0)return;boosterCounts.hint--;var found=null;
   for(var t=0;t<10&&!found;t++){if(shelfItems.filter(function(s){return s&&s._tileType===t}).length>=2)found=tiles.find(function(tile){return!tile.removed&&tile.type===t&&!isBlocked(tile)})}
   if(!found)found=tiles.find(function(t){return!t.removed&&!isBlocked(t)});
   if(found&&found.sprite)animatePulse(found.sprite);
@@ -257,34 +260,30 @@ function onTileClick(tile){
   if(shelfItems.filter(function(s){return s!==null}).length>=maxShelf){checkLose();return}
   tile.removed=true;animating=true;
   undoStack.push({tile:tile,shelfIdx:slotIdx});
-
-  // Animation: press effect THEN fly to shelf
-  var sp=tile.sprite;
-  var fromX=sp.x;var fromY=sp.y;
-  // Press: scale down then up
+  var sp=tile.sprite;var fromX=sp.x;var fromY=sp.y;
+  // Press animation: shrink → grow → fly
   animateScale(sp,1,0.85,80,function(){
     animateScale(sp,0.85,1.1,100,function(){
-      // Now create flying sprite on flyLayer (top z-index)
-      var fly=makeTileSprite(tile.type,false,1);
+      // Create flying tile on flyLayer (top z-index)
+      var fly=makeTileSprite(tile.type,false,TW,TH);
       fly.x=fromX;fly.y=fromY;
       flyLayer.addChild(fly);
       sp.visible=false;
-
-      var targetX=slotIdx*slotSize*1.05+(SW-maxShelf*slotSize*1.05)/2;
-      var targetY=SH-SHELF_H+(SHELF_H-slotSize)/2;
-
+      // Target: shelf slot position
+      var shelfStartX=(SW-maxShelf*(SLOT_W+4))/2;
+      var targetX=shelfStartX+slotIdx*(SLOT_W+4)+(SLOT_W-TW*SLOT_W/TW)/2;
+      var targetY=SH-SHELF_H+(SHELF_H-SLOT_H)/2;
       animateMove(fly,fly.x,fly.y,targetX,targetY,280,function(){
-        // Resize to slot
-        var ts=slotSize/tileSize;
-        fly.scale.set(ts);
-        shelfItems[slotIdx]=fly;
+        // Resize to slot size
+        var scX=SLOT_W/TW;var scY=SLOT_H/TH;
+        fly.scale.set(scX,scY);
         fly.x=targetX;fly.y=targetY;
+        shelfItems[slotIdx]=fly;
         shelfContainer.addChild(fly);
         flyLayer.removeChild(fly);
         animating=false;
         checkTriple();
         setTimeout(function(){checkLose()},350);
-        // Refresh blocked states on remaining tiles
         refreshBlockedStates();
       });
     });
@@ -301,23 +300,8 @@ function refreshBlockedStates(){
   });
 }
 
-// ===== LAYOUT HELPERS =====
-function getFieldOffset(){
-  var activeTiles=tiles.filter(function(t){return!t.removed});
-  if(activeTiles.length===0)return{x:0,y:0};
-  var maxCol=0,maxRow=0;
-  activeTiles.forEach(function(t){if(t.col>maxCol)maxCol=t.col;if(t.row>maxRow)maxRow=t.row});
-  var totalW=(maxCol+1)*tileSize*1.1;
-  var totalH=(maxRow+1)*tileSize*0.9+tileSize*0.1;
-  return{x:(SW-totalW)/2,y:TOP_H+(FIELD_H-totalH)/2};
-}
-
 // ===== SCREENS =====
-function clearAll(){
-  stage.removeChildren();
-  fieldContainer=null;shelfContainer=null;topBar=null;flyLayer=null;
-  confettiParticles.forEach(function(p){p.parent&&p.parent.removeChild(p)});confettiParticles=[];
-}
+function clearAll(){stage.removeChildren();fieldContainer=null;shelfContainer=null;topBar=null;flyLayer=null;confettiParticles.forEach(function(p){p.parent&&p.parent.removeChild(p)});confettiParticles=[]}
 
 function drawMenu(){
   clearAll();screenState='menu';
@@ -338,81 +322,76 @@ function startGame(){
 }
 
 function rebuildPlayScreen(){
-  // Clean up containers
   stage.removeChildren();confettiParticles=[];
-  // Create containers with z-order
   fieldContainer=new PIXI.Container();fieldContainer.zIndex=1;
   shelfContainer=new PIXI.Container();shelfContainer.zIndex=2;
   flyLayer=new PIXI.Container();flyLayer.zIndex=10;
   topBar=new PIXI.Container();topBar.zIndex=5;
   stage.addChild(fieldContainer);stage.addChild(shelfContainer);stage.addChild(flyLayer);stage.addChild(topBar);
 
-  // ===== TOP BAR: score + buttons =====
-  var tbg=new PIXI.Graphics();tbg.beginFill(0x1A1A2E,0.9);tbg.drawRect(0,0,SW,TOP_H);tbg.endFill();topBar.addChild(tbg);
-  // Score
-  var st=new PIXI.Text('Score: '+score,{fontSize:Math.min(SW*0.04,18),fill:0xF1C40F,fontWeight:'bold'});
-  st.x=SW/2;st.y=TOP_H/2;st.anchor.set(0.5);st._isScore=true;topBar.addChild(st);
-  // Pause btn
-  var btnH=TOP_H*0.75;
+  // ===== TOP BAR =====
+  var tbg=new PIXI.Graphics();tbg.beginFill(0x1A1A2E,0.92);tbg.drawRect(0,0,SW,TOP_H);tbg.endFill();topBar.addChild(tbg);
+  var st=new PIXI.Text('⭐ '+score,{fontSize:Math.min(SW*0.04,16),fill:0xF1C40F,fontWeight:'bold'});st.x=SW/2;st.y=TOP_H/2;st.anchor.set(0.5);st._isScore=true;topBar.addChild(st);
+  var btnH=TOP_H*0.7;
   var pb=makeButton('⏸',0x7F8C8D,btnH,btnH,function(){drawMenu()});pb.x=SW-btnH-6;pb.y=(TOP_H-btnH)/2;topBar.addChild(pb);
-  // Editor btn
   var eb=makeButton('🔧',0x555,btnH,btnH,function(){toggleEditor()});eb.x=6;eb.y=(TOP_H-btnH)/2;topBar.addChild(eb);
-  // Booster buttons in top bar row 2 (if space) or below score
-  var bbw=Math.min(SW*0.22,80);var bbh=Math.min(TOP_H*0.7,34);
-  var bby=TOP_H; // below top bar
+
+  // Booster bar below top
+  var bbarH=Math.max(SH*0.06,36);
+  var bbar=new PIXI.Graphics();bbar.beginFill(0x16213E,0.85);bbar.drawRect(0,TOP_H,SW,bbarH);bbar.endFill();topBar.addChild(bbar);
+  var bbw=Math.min(SW*0.22,80);var bbh=bbarH-8;
   var startX=(SW-4*bbw-3*4)/2;
-  var btns=[
-    {text:'↩'+boosterCounts.undo,color:0x8E44AD,fn:boosterUndo},
-    {text:'🔀'+boosterCounts.shuffle,color:0x2980B9,fn:boosterShuffle},
-    {text:'+1 ('+boosterCounts.extraSlot+')',color:0x27AE60,fn:boosterExtraSlot},
-    {text:'💡'+boosterCounts.hint,color:0xE67E22,fn:boosterHint}
-  ];
-  // Put boosters in a secondary bar below top bar
-  var bbar=new PIXI.Graphics();bbar.beginFill(0x16213E,0.85);bbar.drawRect(0,TOP_H,SW,bbh+8);bbar.endFill();topBar.addChild(bbar);
-  btns.forEach(function(b,i){
+  [{text:'↩'+boosterCounts.undo,color:0x8E44AD,fn:boosterUndo},{text:'🔀'+boosterCounts.shuffle,color:0x2980B9,fn:boosterShuffle},{text:'+1('+boosterCounts.extraSlot+')',color:0x27AE60,fn:boosterExtraSlot},{text:'💡'+boosterCounts.hint,color:0xE67E22,fn:boosterHint}].forEach(function(b,i){
     var btn=makeButton(b.text,b.color,bbw,bbh,b.fn);btn.x=startX+i*(bbw+4);btn.y=TOP_H+4;topBar.addChild(btn);
   });
 
-  // ===== FIELD: tiles =====
-  var fbg=new PIXI.Graphics();fbg.beginFill(0xF5F0E8);fbg.drawRoundedRect(4,TOP_H+bbh+10,SW-8,FIELD_H-bbh-16,12);fbg.endFill();fieldContainer.addChild(fbg);
-  var off=getFieldOffset();
-  var fieldTop=TOP_H+bbh+10;
-  tiles.forEach(function(tile){
-    if(tile.removed)return;
+  // ===== FIELD: stacks with gaps =====
+  var ft=getFieldTop();
+  var fbg=new PIXI.Graphics();fbg.beginFill(0xF5F0E8);fbg.drawRoundedRect(4,ft,SW-8,FIELD_H-8,12);fbg.endFill();fieldContainer.addChild(fbg);
+
+  // Calculate field content size for centering
+  var activeTiles=tiles.filter(function(t){return!t.removed});
+  var maxCol=0,maxRow=0;
+  activeTiles.forEach(function(t){if(t.col>maxCol)maxCol=t.col;if(t.row>maxRow)maxRow=t.row});
+  var contentW=(maxCol+1)*(TW+GRID_GAP);
+  var contentH=(maxRow+1)*(TH*0.75+GRID_GAP)+TH*0.25;
+  var offX=Math.max((SW-contentW)/2,GRID_GAP);
+  var offY=ft+Math.max((FIELD_H-8-contentH)/2,GRID_GAP);
+
+  activeTiles.forEach(function(tile){
     var blocked=isBlocked(tile);
-    var sp=makeTileSprite(tile.type,blocked,1);
-    sp.x=getTileX(tile)+off.x;
-    sp.y=getTileY(tile)+fieldTop+(FIELD_H-bbh-16-(tiles.length>0?((Math.max.apply(null,tiles.filter(function(t){return!t.removed}).map(function(t){return t.row}))+1)*tileSize*0.9):0))/2;
+    var sp=makeTileSprite(tile.type,blocked,TW,TH);
+    sp.x=getStackX(tile.col)+offX+getLayerOffX(tile.layer);
+    sp.y=getStackY(tile.row,0)+offY+getLayerOffY(tile.layer);
     if(!blocked){sp.eventMode='static';sp.cursor='pointer';sp.on('pointerdown',function(){onTileClick(tile)})}
     tile.sprite=sp;fieldContainer.addChild(sp);
   });
 
   // ===== SHELF: bottom =====
   var sbg=new PIXI.Graphics();sbg.beginFill(0x8B6F47);sbg.drawRect(0,SH-SHELF_H,SW,SHELF_H);sbg.endFill();shelfContainer.addChild(sbg);
+  var shelfStartX=(SW-maxShelf*(SLOT_W+4))/2;
   for(var i=0;i<maxShelf;i++){
-    var sl=makeSlotSprite();sl.x=i*slotSize*1.05+(SW-maxShelf*slotSize*1.05)/2;sl.y=SH-SHELF_H+(SHELF_H-slotSize)/2;shelfContainer.addChild(sl);
+    var sl=makeSlotSprite();sl.x=shelfStartX+i*(SLOT_W+4);sl.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2;shelfContainer.addChild(sl);
   }
   shelfItems.forEach(function(item,idx){
     if(!item)return;
-    item.x=idx*slotSize*1.05+(SW-maxShelf*slotSize*1.05)/2;
-    item.y=SH-SHELF_H+(SHELF_H-slotSize)/2;
-    item.scale.set(slotSize/tileSize);
+    item.x=shelfStartX+idx*(SLOT_W+4)+(SLOT_W-item._w*SLOT_W/TW)/2;
+    item.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2;
+    item.scale.set(SLOT_W/TW,SLOT_H/TH);
     shelfContainer.addChild(item);
   });
 }
 
 function rebuildShelfVisuals(){
+  var shelfStartX=(SW-maxShelf*(SLOT_W+4))/2;
   shelfItems.forEach(function(item,idx){
     if(!item)return;
-    item.x=idx*slotSize*1.05+(SW-maxShelf*slotSize*1.05)/2;
-    item.y=SH-SHELF_H+(SHELF_H-slotSize)/2;
+    item.x=shelfStartX+idx*(SLOT_W+4);
+    item.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2;
   });
 }
 
-function updateScoreText(){
-  if(!topBar)return;
-  topBar.children.forEach(function(c){if(c._isScore)c.text='Score: '+score});
-}
+function updateScoreText(){if(!topBar)return;topBar.children.forEach(function(c){if(c._isScore)c.text='⭐ '+score})}
 
 function drawWin(){
   clearAll();screenState='win';
@@ -430,7 +409,6 @@ function drawLose(){
   clearAll();screenState='lose';
   var c=new PIXI.Container();c.zIndex=0;stage.addChild(c);
   var bg=new PIXI.Graphics();bg.beginFill(0x000000,0.7);bg.drawRect(0,0,SW,SH);bg.endFill();c.addChild(bg);
-  // shake
   var i=0;function sh(){if(i>=6){c.x=0;return}c.x=i%2===0?8:-8;i++;setTimeout(sh,60)}sh();
   var t=new PIXI.Text('😢 Shelf Full!',{fontSize:Math.min(SW*0.1,42),fill:0xE74C3C,fontWeight:'bold'});t.anchor.set(0.5);t.x=SW/2;t.y=SH*0.28;c.addChild(t);
   var bw=SW*0.5;var bh=SW*0.1;
@@ -439,7 +417,6 @@ function drawLose(){
   var mb=makeButton('🏠 Menu',0x2980B9,bw,bh,function(){drawMenu()});mb.x=(SW-bw)/2;mb.y=SH*0.45+bh*2.6;c.addChild(mb);
 }
 
-// ===== START =====
 drawMenu();
 </script>
 </body>
