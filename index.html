@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Tile Match - Triple Puzzle</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+canvas { display: block; }
+#editor-panel {
+  display: none;
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 400px;
+  background: rgba(30, 30, 30, 0.95);
+  border-radius: 16px;
+  padding: 28px;
+  color: #fff;
+  font-family: Arial, sans-serif;
+  z-index: 100;
+  border: 1px solid #555;
+}
+#editor-panel h2 { text-align: center; margin-bottom: 18px; font-size: 22px; }
+#editor-panel label { display: block; margin-top: 12px; font-size: 14px; color: #ccc; }
+#editor-panel input[type="range"] {
+  width: 100%; margin-top: 4px;
+}
+#editor-panel .val { float: right; color: #F1C40F; font-weight: bold; }
+#editor-panel .btn-row { margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+#editor-panel button {
+  padding: 10px 18px; border: none; border-radius: 8px; cursor: pointer;
+  font-size: 14px; font-weight: bold; color: #fff;
+}
+#editor-panel .btn-apply { background: #27AE60; }
+#editor-panel .btn-export { background: #2980B9; }
+#editor-panel .btn-import { background: #E67E22; }
+#editor-panel .btn-close { background: #C0392B; }
+#editor-panel textarea {
+  width: 100%; height: 80px; margin-top: 10px; border-radius: 6px;
+  border: 1px solid #555; background: #222; color: #fff; padding: 8px; font-size: 12px;
+  display: none;
+}
+</style>
+</head>
+<body>
+<div id="editor-panel">
+  <h2>🔧 Level Editor</h2>
+  <label>Tile Types: <span class="val" id="val-types">8</span></label>
+  <input type="range" id="sl-types" min="5" max="15" value="8" step="1">
+  <label>Layers: <span class="val" id="val-layers">2</span></label>
+  <input type="range" id="sl-layers" min="1" max="5" value="2" step="1">
+  <label>Tiles per Type: <span class="val" id="val-pertype">6</span></label>
+  <input type="range" id="sl-pertype" min="3" max="12" value="6" step="3">
+  <label>Boosters: <span class="val" id="val-boosters">3</span></label>
+  <input type="range" id="sl-boosters" min="0" max="10" value="3" step="1">
+  <div class="btn-row">
+    <button class="btn-apply" onclick="editorApply()">Apply</button>
+    <button class="btn-export" onclick="editorExport()">Export JSON</button>
+    <button class="btn-import" onclick="editorShowImport()">Import JSON</button>
+    <button class="btn-close" onclick="editorClose()">Close</button>
+  </div>
+  <textarea id="editor-json" placeholder="Paste JSON here..."></textarea>
+</div>
+<script src="https://pixijs.download/latest/pixi.min.js"></script>
+<script>
+// ===== AUTH =====
+(function(){
+  var pwd = prompt("Enter password:");
+  if(btoa(pwd) !== btoa("tile123")){
+    alert("Wrong password!");
+    location.reload();
+  }
+})();
+
+// ===== CONSTANTS =====
+var TILE_W = 70, TILE_H = 70, TILE_R = 10;
+var SHELF_SLOT_W = 80, SHELF_SLOT_H = 80;
+var SHELF_MAX = 7, SHELF_EXTRA = 8;
+var LAYER_OFFSET_X = 14, LAYER_OFFSET_Y = 18;
+
+var EMOJIS = ['🍎','🍊','🍋','🍇','🍓','🍑','🥝','🍌','🍒','🫐'];
+var COLORS = ['#E74C3C','#E67E22','#F1C40F','#9B59B6','#E91E63','#FF9800','#8BC34A','#FFC107','#F44336','#00BCD4'];
+
+// ===== GAME STATE =====
+var app, stage;
+var screenState = 'menu'; // menu | play | win | lose
+var tiles = [];
+var shelf = [];
+var shelfMax = SHELF_MAX;
+var score = 0;
+var moveHistory = [];
+var boosters = { undo: 3, shuffle: 3, extra: 3, hint: 3 };
+var levelConfig = { types: 8, layers: 2, perType: 6, boosters: 3 };
+var fieldContainer, shelfContainer, uiContainer;
+var menuContainer, winContainer, loseContainer;
+var fieldBg, shelfBg;
+var animating = false;
+
+// ===== PIXI INIT =====
+app = new PIXI.Application({
+  width: window.innerWidth,
+  height: window.innerHeight,
+  backgroundColor: 0x000000,
+  resolution: window.devicePixelRatio || 1,
+  autoDensity: true
+});
+document.body.appendChild(app.view);
+app.view.style.position = 'fixed';
+app.view.style.left = '0';
+app.view.style.top = '0';
+stage = app.stage;
+
+window.addEventListener('resize', function(){
+  app.renderer.resize(window.innerWidth, window.innerHeight);
+  if(screenState === 'play') rebuildVisuals();
+  if(screenState === 'menu') drawMenu();
+  if(screenState === 'win') drawWin();
+  if(screenState === 'lose') drawLose();
+});
+
+// ===== EDITOR =====
+document.addEventListener('keydown', function(e){
+  if(e.key === 'e' || e.key === 'E'){
+    if(screenState === 'play'){
+      var panel = document.getElementById('editor-panel');
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    }
+  }
+});
+
+['types','layers','pertype','boosters'].forEach(function(k){
+  var sl = document.getElementById('sl-' + k);
+  var vl = document.getElementById('val-' + k);
+  sl.addEventListener('input', function(){
+    vl.textContent = sl.value;
+  });
+});
+
+function editorApply(){
+  levelConfig.types = parseInt(document.getElementById('sl-types').value);
+  levelConfig.layers = parseInt(document.getElementById('sl-layers').value);
+  levelConfig.perType = parseInt(document.getElementById('sl-pertype').value);
+  levelConfig.boosters = parseInt(document.getElementById('sl-boosters').value);
+  editorClose();
+  startGame();
+}
+
+function editorExport(){
+  var ta = document.getElementById('editor-json');
+  ta.style.display = 'block';
+  ta.value = JSON.stringify(levelConfig, null, 2);
+  ta.select();
+}
+
+function editorShowImport(){
+  var ta = document.getElementById('editor-json');
+  ta.style.display = 'block';
+  ta.value = '';
+  ta.focus();
+  // Replace import button temporarily
+  var btns = document.querySelector('#editor-panel .btn-row');
+  var impBtn = btns.querySelector('.btn-import');
+  var origOnclick = impBtn.onclick;
+  impBtn.textContent = 'Load JSON';
+  impBtn.onclick = function(){
+    try{
+      var obj = JSON.parse(ta.value);
+      if(obj.types) { levelConfig.types = obj.types; document.getElementById('sl-types').value = obj.types; document.getElementById('val-types').textContent = obj.types; }
+      if(obj.layers !== undefined) { levelConfig.layers = obj.layers; document.getElementById('sl-layers').value = obj.layers; document.getElementById('val-layers').textContent = obj.layers; }
+      if(obj.perType) { levelConfig.perType = obj.perType; document.getElementById('sl-pertype').value = obj.perType; document.getElementById('val-pertype').textContent = obj.perType; }
+      if(obj.boosters !== undefined) { levelConfig.boosters = obj.boosters; document.getElementById('sl-boosters').value = obj.boosters; document.getElementById('val-boosters').textContent = obj.boosters; }
+      impBtn.textContent = 'Import JSON';
+      impBtn.onclick = editorShowImport;
+      ta.style.display = 'none';
+    }catch(e){ alert('Invalid JSON'); }
+  };
+}
+
+function editorClose(){
+  document.getElementById('editor-panel').style.display = 'none';
+  document.getElementById('editor-json').style.display = 'none';
+}
+
+// ===== DRAWING HELPERS =====
+function drawRoundedRect(g, x, y, w, h, r, color, alpha){
+  g.beginFill(color, alpha !== undefined ? alpha : 1);
+  g.drawRoundedRect(x, y, w, h, r);
+  g.endFill();
+}
+
+function drawRoundedRectOutline(g, x, y, w, h, r, color, lineW){
+  g.lineStyle(lineW || 2, color, 1);
+  g.drawRoundedRect(x, y, w, h, r);
+  g.lineStyle(0);
+}
+
+function makeTileGraphic(type, scale){
+  var c = new PIXI.Container();
+  var g = new PIXI.Graphics();
+  var color = PIXI.utils.string2hex(COLORS[type]);
+  // Shadow
+  g.beginFill(0x000000, 0.2);
+  g.drawRoundedRect(3, 3, TILE_W, TILE_H, TILE_R);
+  g.endFill();
+  // Body
+  g.beginFill(color, 1);
+  g.drawRoundedRect(0, 0, TILE_W, TILE_H, TILE_R);
+  g.endFill();
+  // Lighter top edge
+  g.beginFill(0xFFFFFF, 0.2);
+  g.drawRoundedRect(0, 0, TILE_W, TILE_H * 0.45, TILE_R);
+  g.endFill();
+  // Outline
+  g.lineStyle(2, 0x000000, 0.15);
+  g.drawRoundedRect(0, 0, TILE_W, TILE_H, TILE_R);
+  g.lineStyle(0);
+  c.addChild(g);
+  // Emoji text
+  var t = new PIXI.Text(EMOJIS[type], { fontSize: 34 });
+  t.anchor.set(0.5);
+  t.x = TILE_W / 2;
+  t.y = TILE_H / 2;
+  c.addChild(t);
+  if(scale) c.scale.set(scale);
+  return c;
+}
+
+function makeShelfSlotGraphic(){
+  var g = new PIXI.Graphics();
+  g.lineStyle(2, 0xFFFFFF, 0.4);
+  g.drawRoundedRect(0, 0, SHELF_SLOT_W, SHELF_SLOT_H, 8);
+  g.lineStyle(0);
+  // subtle fill
+  g.beginFill(0xFFFFFF, 0.06);
+  g.drawRoundedRect(0, 0, SHELF_SLOT_W, SHELF_SLOT_H, 8);
+  g.endFill();
+  return g;
+}
+
+// ===== SCREENS =====
+function clearStage(){
+  while(stage.children.length > 0) stage.removeChildAt(0);
+}
+
+function drawMenu(){
+  clearStage();
+  screenState = 'menu';
+  menuContainer = new PIXI.Container();
+  stage.addChild(menuContainer);
+
+  var cx = app.renderer.width / (2 * (app.renderer.resolution || 1));
+  var cy = app.renderer.height / (2 * (app.renderer.resolution || 1));
+
+  // Background gradient-like
+  var bg = new PIXI.Graphics();
+  bg.beginFill(0x1a1a2e, 1);
+  bg.drawRect(0, 0, app.renderer.width, app.renderer.height);
+  bg.endFill();
+  // Decorative circles
+  for(var i = 0; i < 6; i++){
+    bg.beginFill(PIXI.utils.string2hex(COLORS[i]), 0.08);
+    bg.drawCircle(cx + Math.cos(i)*120, cy - 60 + Math.sin(i*1.3)*80, 80 + i*20);
+    bg.endFill();
+  }
+  menuContainer.addChild(bg);
+
+  // Title
+  var title = new PIXI.Text('Tile Match', { fontSize: 52, fill: 0xFFFFFF, fontWeight: 'bold', dropShadow: true, dropShadowDistance: 3, dropShadowColor: 0x000000 });
+  title.anchor.set(0.5);
+  title.x = cx;
+  title.y = cy - 120;
+  menuContainer.addChild(title);
+
+  var subtitle = new PIXI.Text('Triple Puzzle', { fontSize: 28, fill: 0xF1C40F, fontWeight: 'bold' });
+  subtitle.anchor.set(0.5);
+  subtitle.x = cx;
+  subtitle.y = cy - 65;
+  menuContainer.addChild(subtitle);
+
+  // Play button
+  var playBtn = makeButton('▶  Play', cx, cy + 20, 200, 56, 0x27AE60, function(){
+    startGame();
+  });
+  menuContainer.addChild(playBtn);
+
+  // Editor button
+  var editBtn = makeButton('🔧 Editor', cx, cy + 95, 200, 56, 0x2980B9, function(){
+    document.getElementById('editor-panel').style.display = 'block';
+  });
+  menuContainer.addChild(editBtn);
+}
+
+function makeButton(text, x, y, w, h, color, cb){
+  var c = new PIXI.Container();
+  c.x = x; c.y = y;
+  c.eventMode = 'static';
+  c.cursor = 'pointer';
+
+  var g = new PIXI.Graphics();
+  g.beginFill(color, 1);
+  g.drawRoundedRect(-w/2, -h/2, w, h, 12);
+  g.endFill();
+  // hover effect
+  g.beginFill(0xFFFFFF, 0);
+  g.drawRoundedRect(-w/2, -h/2, w, h, 12);
+  g.endFill();
+  c.addChild(g);
+
+  var t = new PIXI.Text(text, { fontSize: 22, fill: 0xFFFFFF, fontWeight: 'bold' });
+  t.anchor.set(0.5);
+  c.addChild(t);
+
+  c.on('pointerdown', cb);
+  c.on('pointerover', function(){ g.clear(); g.beginFill(color, 1); g.drawRoundedRect(-w/2, -h/2, w, h, 12); g.endFill(); g.beginFill(0xFFFFFF, 0.15); g.drawRoundedRect(-w/2, -h/2, w, h, 12); g.endFill(); });
+  c.on('pointerout', function(){ g.clear(); g.beginFill(color, 1); g.drawRoundedRect(-w/2, -h/2, w, h, 12); g.endFill(); });
+  return c;
+}
+
+function drawWin(){
+  clearStage();
+  screenState = 'win';
+  winContainer = new PIXI.Container();
+  stage.addChild(winContainer);
+
+  var cx = app.renderer.width / (2 * (app.renderer.resolution || 1));
+  var cy = app.renderer.height / (2 * (app.renderer.resolution || 1));
+
+  var bg = new PIXI.Graphics();
+  bg.beginFill(0x1a1a2e, 0.85);
+  bg.drawRect(0, 0, app.renderer.width, app.renderer.height);
+  bg.endFill();
+  winContainer.addChild(bg);
+
+  // Confetti circles
+  for(var i = 0; i < 30; i++){
+    var cc = new PIXI.Graphics();
+    cc.beginFill(PIXI.utils.string2hex(COLORS[i % 10]), 0.6);
+    cc.drawCircle(0, 0, 4 + Math.random()*6);
+    cc.endFill();
+    cc.x = Math.random() * app.renderer.width / (app.renderer.resolution || 1);
+    cc.y = Math.random() * app.renderer.height / (app.renderer.resolution || 1);
+    winContainer.addChild(cc);
+  }
+
+  var title = new PIXI.Text('🎉 You Win!', { fontSize: 52, fill: 0xF1C40F, fontWeight: 'bold' });
+  title.anchor.set(0.5);
+  title.x = cx;
+  title.y = cy - 60;
+  winContainer.addChild(title);
+
+  var sc = new PIXI.Text('Score: ' + score, { fontSize: 28, fill: 0xFFFFFF });
+  sc.anchor.set(0.5);
+  sc.x = cx;
+  sc.y = cy;
+  winContainer.addChild(sc);
+
+  var btn = makeButton('Play Again', cx, cy + 70, 200, 56, 0x27AE60, function(){ drawMenu(); });
+  winContainer.addChild(btn);
+}
+
+function drawLose(){
+  clearStage();
+  screenState = 'lose';
+  loseContainer = new PIXI.Container();
+  stage.addChild(loseContainer);
+
+  var cx = app.renderer.width / (2 * (app.renderer.resolution || 1));
+  var cy = app.renderer.height / (2 * (app.renderer.resolution || 1));
+
+  var bg = new PIXI.Graphics();
+  bg.beginFill(0x1a1a2e, 0.85);
+  bg.drawRect(0, 0, app.renderer.width, app.renderer.height);
+  bg.endFill();
+  loseContainer.addChild(bg);
+
+  var title = new PIXI.Text('😢 Game Over', { fontSize: 48, fill: 0xE74C3C, fontWeight: 'bold' });
+  title.anchor.set(0.5);
+  title.x = cx;
+  title.y = cy - 60;
+  loseContainer.addChild(title);
+
+  var sc = new PIXI.Text('Score: ' + score, { fontSize: 28, fill: 0xFFFFFF });
+  sc.anchor.set(0.5);
+  sc.x = cx;
+  sc.y = cy;
+  loseContainer.addChild(sc);
+
+  var btn = makeButton('Try Again', cx, cy + 70, 200, 56, 0xE74C3C, function(){ drawMenu(); });
+  loseContainer.addChild(btn);
+}
+
+// ===== GAME LOGIC =====
+function startGame(){
+  clearStage();
+  screenState = 'play';
+  editorClose();
+
+  tiles = [];
+  shelf = [];
+  shelfMax = SHELF_MAX;
+  score = 0;
+  moveHistory = [];
+  animating = false;
+
+  var numTypes = levelConfig.types;
+  var numLayers = levelConfig.layers;
+  var perType = levelConfig.perType;
+  var numBoosters = levelConfig.boosters;
+
+  boosters = { undo: numBoosters, shuffle: numBoosters, extra: numBoosters, hint: numBoosters };
+
+  // Generate tile data
+  var totalTiles = numTypes * perType;
+  var tileTypes = [];
+  for(var t = 0; t < numTypes; t++){
+    for(var p = 0; p < perType; p++){
+      tileTypes.push(t % 10); // wrap around 10 emojis
+    }
+  }
+  shuffleArray(tileTypes);
+
+  // Layout: distribute tiles across layers in a grid-like pattern with random offsets
+  // We compute a grid and place tiles
+  var W = app.renderer.width / (app.renderer.resolution || 1);
+  var H = app.renderer.height / (app.renderer.resolution || 1);
+  var shelfAreaH = 140;
+  var fieldAreaH = H - shelfAreaH - 60;
+  var fieldAreaW = W - 40;
+
+  // Calculate how many tiles per layer roughly
+  var tilesPerLayer = Math.ceil(totalTiles / numLayers);
+  var tileIdx = 0;
+
+  for(var layer = 0; layer < numLayers; layer++){
+    var count = Math.min(tilesPerLayer, totalTiles - tileIdx);
+    if(count <= 0) break;
+
+    // Calculate grid cols/rows for this layer
+    var aspect = fieldAreaW / fieldAreaH;
+    var cols = Math.max(2, Math.round(Math.sqrt(count * aspect)));
+    var rows = Math.max(2, Math.ceil(count / cols));
+    var cellW = Math.min(fieldAreaW / cols, 85);
+    var cellH = Math.min(fieldAreaH / rows, 85);
+    var gridW = cols * cellW;
+    var gridH = rows * cellH;
+    var startX = (W - gridW) / 2 + LAYER_OFFSET_X * layer;
+    var startY = 30 + (fieldAreaH - gridH) / 2 + LAYER_OFFSET_Y * layer;
+
+    var placed = 0;
+    for(var r = 0; r < rows && placed < count; r++){
+      for(var c = 0; c < cols && placed < count; c++){
+        var tx = startX + c * cellW + (Math.random() - 0.5) * 12;
+        var ty = startY + r * cellH + (Math.random() - 0.5) * 12;
+        tiles.push({
+          type: tileTypes[tileIdx],
+          x: tx,
+          y: ty,
+          layer: layer,
+          removed: false,
+          id: tileIdx
+        });
+        tileIdx++;
+        placed++;
+      }
+    }
+  }
+
+  buildGameScreen();
+}
+
+function buildGameScreen(){
+  clearStage();
+  stage.addChild(fieldContainer = new PIXI.Container());
+  stage.addChild(shelfContainer = new PIXI.Container());
+  stage.addChild(uiContainer = new PIXI.Container());
+  rebuildVisuals();
+}
+
+function rebuildVisuals(){
+  if(!fieldContainer) return;
+  fieldContainer.removeChildren();
+  shelfContainer.removeChildren();
+  uiContainer.removeChildren();
+
+  var W = app.renderer.width / (app.renderer.resolution || 1);
+  var H = app.renderer.height / (app.renderer.resolution || 1);
+  var shelfAreaH = 140;
+
+  // Field background
+  fieldBg = new PIXI.Graphics();
+  fieldBg.beginFill(0xF5F0E8, 1);
+  fieldBg.drawRect(0, 0, W, H - shelfAreaH);
+  fieldBg.endFill();
+  fieldContainer.addChildAt(fieldBg, 0);
+
+  // Shelf background
+  shelfBg = new PIXI.Graphics();
+  shelfBg.beginFill(0x8B6F47, 1);
+  shelfBg.drawRect(0, H - shelfAreaH, W, shelfAreaH);
+  shelfBg.endFill();
+  shelfContainer.addChildAt(shelfBg, 0);
+
+  // Draw tiles (layer order: lower layers first so higher layers draw on top)
+  var sortedTiles = tiles.filter(function(t){ return !t.removed; }).slice();
+  sortedTiles.sort(function(a, b){ return a.layer - b.layer; });
+
+  sortedTiles.forEach(function(tile){
+    var vis = makeTileGraphic(tile.type);
+    vis.x = tile.x;
+    vis.y = tile.y;
+    tile._vis = vis;
+    tile._blocked = isBlocked(tile);
+
+    // Dim blocked tiles
+    if(tile._blocked){
+      vis.alpha = 0.55;
+    }
+
+    vis.eventMode = 'static';
+    vis.cursor = tile._blocked ? 'not-allowed' : 'pointer';
+    vis.on('pointerdown', function(){
+      if(!animating && screenState === 'play') onTileClick(tile);
+    });
+
+    fieldContainer.addChild(vis);
+  });
+
+  // Draw shelf
+  drawShelf();
+
+  // UI: boosters + score
+  drawUI();
+}
+
+function drawShelf(){
+  // Remove old shelf drawings (keep shelfBg at index 0)
+  while(shelfContainer.children.length > 1) shelfContainer.removeChildAt(1);
+
+  var W = app.renderer.width / (app.renderer.resolution || 1);
+  var H = app.renderer.height / (app.renderer.resolution || 1);
+  var shelfAreaH = 140;
+
+  var totalSlots = shelfMax;
+  var slotSpacing = SHELF_SLOT_W + 6;
+  var totalW = totalSlots * slotSpacing - 6;
+  var startX = (W - totalW) / 2;
+  var startY = H - shelfAreaH + (shelfAreaH - SHELF_SLOT_H) / 2;
+
+  // Draw slot outlines
+  for(var i = 0; i < totalSlots; i++){
+    var slotG = makeShelfSlotGraphic();
+    slotG.x = startX + i * slotSpacing;
+    slotG.y = startY;
+    shelfContainer.addChild(slotG);
+  }
+
+  // Draw tiles in shelf
+  for(var i = 0; i < shelf.length; i++){
+    var s = shelf[i];
+    var vis = makeTileGraphic(s.type, SHELF_SLOT_W / TILE_W);
+    vis.x = startX + i * slotSpacing + (SHELF_SLOT_W - (TILE_W * (SHELF_SLOT_W / TILE_W))) / 2;
+    vis.y = startY + (SHELF_SLOT_H - (TILE_H * (SHELF_SLOT_W / TILE_W))) / 2;
+    s._shelfVis = vis;
+    shelfContainer.addChild(vis);
+  }
+}
+
+function drawUI(){
+  var W = app.renderer.width / (app.renderer.resolution || 1);
+
+  // Score
+  var scoreText = new PIXI.Text('Score: ' + score, { fontSize: 22, fill: 0xFFFFFF, fontWeight: 'bold' });
+  scoreText.x = 16;
+  scoreText.y = 8;
+  uiContainer.addChild(scoreText);
+
+  // Booster buttons
+  var boosterDefs = [
+    { key: 'undo', label: '↩ Undo', color: 0x9B59B6 },
+    { key: 'shuffle', label: '🔀 Shuffle', color: 0xE67E22 },
+    { key: 'extra', label: '+1 Slot', color: 0x27AE60 },
+    { key: 'hint', label: '💡 Hint', color: 0xF1C40F }
+  ];
+
+  var btnW = 100, btnH = 40, gap = 10;
+  var totalBtnW = boosterDefs.length * (btnW + gap) - gap;
+  var startX = W - totalBtnW - 16;
+  var startY = 10;
+
+  boosterDefs.forEach(function(def, i){
+    var btn = new PIXI.Container();
+    btn.x = startX + i * (btnW + gap);
+    btn.y = startY;
+    btn.eventMode = 'static';
+    btn.cursor = 'pointer';
+
+    var g = new PIXI.Graphics();
+    var col = boosters[def.key] > 0 ? def.color : 0x555555;
+    g.beginFill(col, 1);
+    g.drawRoundedRect(0, 0, btnW, btnH, 8);
+    g.endFill();
+    btn.addChild(g);
+
+    var label = new PIXI.Text(def.label + ' ' + boosters[def.key], { fontSize: 13, fill: 0xFFFFFF, fontWeight: 'bold' });
+    label.x = btnW / 2;
+    label.y = btnH / 2;
+    label.anchor.set(0.5);
+    btn.addChild(label);
+
+    btn.on('pointerdown', function(){
+      if(!animating && screenState === 'play') useBooster(def.key);
+    });
+
+    uiContainer.addChild(btn);
+  });
+
+  // Remaining tiles counter
+  var remaining = tiles.filter(function(t){ return !t.removed; }).length;
+  var remText = new PIXI.Text('Tiles: ' + remaining, { fontSize: 18, fill: 0xCCCCCC });
+  remText.x = 16;
+  remText.y = 36;
+  uiContainer.addChild(remText);
+}
+
+// ===== BLOCKED CHECK =====
+function isBlocked(tile){
+  for(var i = 0; i < tiles.length; i++){
+    var other = tiles[i];
+    if(other === tile || other.removed) continue;
+    if(other.layer <= tile.layer) continue;
+    // Check bounding box overlap
+    var ow = TILE_W, oh = TILE_H;
+    if(tile.x < other.x + ow && tile.x + ow > other.x &&
+       tile.y < other.y + oh && tile.y + oh > other.y){
+      return true;
+    }
+  }
+  return false;
+}
+
+// ===== TILE CLICK =====
+function onTileClick(tile){
+  if(tile.removed) return;
+  if(isBlocked(tile)) return;
+  if(shelf.length >= shelfMax) return;
+
+  animating = true;
+
+  // Remove from field
+  tile.removed = true;
+  moveHistory.push(tile);
+
+  // Add to shelf
+  shelf.push({ type: tile.type, id: tile.id });
+
+  // Animate: rebuild after short delay for visual effect
+  setTimeout(function(){
+    rebuildVisuals();
+    checkTriple();
+  }, 50);
+}
+
+// ===== CHECK TRIPLE =====
+function checkTriple(){
+  // Count types in shelf
+  var counts = {};
+  shelf.forEach(function(s, i){
+    if(!counts[s.type]) counts[s.type] = [];
+    counts[s.type].push(i);
+  });
+
+  var found = false;
+  for(var type in counts){
+    if(counts[type].length >= 3){
+      found = true;
+      // Remove 3 of this type
+      var indices = counts[type].slice(0, 3).sort(function(a, b){ return b - a; });
+
+      // Animate removal
+      indices.forEach(function(idx){
+        var s = shelf[idx];
+        if(s._shelfVis){
+          // Animate alpha and scale
+          animateRemoval(s._shelfVis);
+        }
+      });
+
+      setTimeout(function(){
+        // Remove from shelf (indices are sorted desc so removal is safe)
+        indices.forEach(function(idx){
+          shelf.splice(idx, 1);
+        });
+        score += 30;
+        rebuildVisuals();
+        // Check for more triples
+        checkTriple();
+        // Check win
+        checkWinLose();
+      }, 400);
+
+      break;
+    }
+  }
+
+  if(!found){
+    animating = false;
+    checkWinLose();
+  }
+}
+
+function animateRemoval(vis){
+  if(!vis) return;
+  var startScale = vis.scale.x;
+  var tick = 0;
+  var interval = setInterval(function(){
+    tick += 0.05;
+    if(tick >= 1){
+      clearInterval(interval);
+      return;
+    }
+    vis.alpha = 1 - tick;
+    vis.scale.set(startScale * (1 - tick * 0.5));
+  }, 16);
+}
+
+// ===== WIN/LOSE CHECK =====
+function checkWinLose(){
+  var remaining = tiles.filter(function(t){ return !t.removed; }).length;
+  if(remaining === 0){
+    animating = true;
+    setTimeout(function(){ drawWin(); }, 300);
+    return;
+  }
+  if(shelf.length >= shelfMax){
+    // Check if there's a triple
+    var counts = {};
+    shelf.forEach(function(s){
+      counts[s.type] = (counts[s.type] || 0) + 1;
+    });
+    var hasTriple = false;
+    for(var t in counts){ if(counts[t] >= 3) hasTriple = true; }
+    if(!hasTriple){
+      animating = true;
+      setTimeout(function(){ drawLose(); }, 300);
+    }
+  }
+}
+
+// ===== BOOSTERS =====
+function useBooster(key){
+  if(boosters[key] <= 0) return;
+
+  if(key === 'undo'){
+    if(moveHistory.length === 0) return;
+    boosters[key]--;
+    var last = moveHistory.pop();
+    last.removed = false;
+    // Remove from shelf
+    for(var i = shelf.length - 1; i >= 0; i--){
+      if(shelf[i].id === last.id){
+        shelf.splice(i, 1);
+        break;
+      }
+    }
+    rebuildVisuals();
+  }
+  else if(key === 'shuffle'){
+    boosters[key]--;
+    // Shuffle remaining tile positions within each layer
+    var remaining = tiles.filter(function(t){ return !t.removed; });
+    var positions = remaining.map(function(t){ return { x: t.x, y: t.y }; });
+    shuffleArray(positions);
+    remaining.forEach(function(t, i){
+      t.x = positions[i].x;
+      t.y = positions[i].y;
+    });
+    rebuildVisuals();
+  }
+  else if(key === 'extra'){
+    if(shelfMax >= SHELF_EXTRA) return;
+    boosters[key]--;
+    shelfMax = SHELF_EXTRA;
+    rebuildVisuals();
+  }
+  else if(key === 'hint'){
+    boosters[key]--;
+    // Find a visible tile and highlight it
+    var visible = tiles.filter(function(t){ return !t.removed && !isBlocked(t); });
+    if(visible.length > 0){
+      var hint = visible[0];
+      if(hint._vis){
+        var vis = hint._vis;
+        var tick = 0;
+        var interval = setInterval(function(){
+          tick++;
+          if(tick > 10){ clearInterval(interval); vis.alpha = isBlocked(hint) ? 0.55 : 1; return; }
+          vis.alpha = tick % 2 === 0 ? 1 : 0.3;
+        }, 150);
+      }
+    }
+  }
+}
+
+// ===== UTILITY =====
+function shuffleArray(arr){
+  for(var i = arr.length - 1; i > 0; i--){
+    var j = Math.floor(Math.random() * (i + 1));
+    var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  }
+}
+
+// ===== INIT =====
+drawMenu();
+</script>
+</body>
+</html>
