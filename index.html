@@ -6,7 +6,7 @@
 <title>Tile Match - Triple Puzzle</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;overflow:hidden;background:#000;touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;touch-action:manipulation;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 canvas{display:block;position:fixed;top:0;left:0}
 #editor-panel{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:90%;max-width:400px;background:rgba(30,30,30,0.95);border-radius:16px;padding:24px;color:#fff;font-family:Arial,sans-serif;z-index:100;border:1px solid #555}
 #editor-panel h2{text-align:center;margin-bottom:16px;font-size:20px}
@@ -16,11 +16,9 @@ canvas{display:block;position:fixed;top:0;left:0}
 #editor-panel .btn-row{margin-top:16px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 #editor-panel button{padding:10px 16px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:bold;color:#fff}
 .btn-apply{background:#27AE60}.btn-export{background:#2980B9}.btn-import{background:#E67E22}.btn-close{background:#C0392B}
-#zoom-hint{position:fixed;bottom:8px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,0.35);font-size:11px;font-family:Arial;z-index:50;pointer-events:none}
 </style>
 </head>
 <body>
-<div id="zoom-hint">👆 Drag to pan · Pinch to zoom</div>
 <div id="editor-panel">
 <h2>🔧 Level Editor</h2>
 <label>Tile Types: <span class="val" id="val-types">8</span></label>
@@ -41,14 +39,11 @@ canvas{display:block;position:fixed;top:0;left:0}
 </div>
 <script src="https://cdn.jsdelivr.net/npm/pixi.js@7/dist/pixi.min.js"></script>
 <script>
-// ===== AUTH =====
 (function(){var p=prompt('Enter password:');if(btoa(p||'')!==btoa('tile123'))location.reload()})();
 
-// ===== EASING =====
 function easeOutCubic(t){return 1-Math.pow(1-t,3)}
 function easeOutBack(t){var c1=1.70158,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2)}
 
-// ===== GLOBALS =====
 var app,stage;
 var COLORS=['#E74C3C','#E67E22','#F1C40F','#9B59B6','#E91E63','#FF9800','#8BC34A','#FFC107','#F44336','#00BCD4'];
 var EMOJIS=['🍎','🍊','🍋','🍇','🍓','🍑','🥝','🍌','🍒','🫐'];
@@ -58,20 +53,16 @@ var score=0,level=1,maxShelf=7;
 var undoStack=[];
 var levelConfig={types:8,layers:2,perType:6,boosters:3};
 var boosterCounts={undo:3,shuffle:3,extraSlot:3,hint:3};
-var fieldContainer,fieldInner,shelfContainer,flyLayer,topBar;
+var fieldContainer,shelfContainer,flyLayer,topBar;
 var animating=false;
 var confettiParticles=[];
-var SW,SH;
-var TW,TH,SLOT_W,SLOT_H;
+
+var SW,SH,TW,TH,SLOT_W,SLOT_H;
 var TOP_H,BBAR_H,FIELD_H,SHELF_H;
-var GRID_GAP_X,GRID_GAP_Y;
 
-// ===== PAN & ZOOM =====
-var panZoom={x:0,y:0,scale:1,minScale:0.5,maxScale:2.5};
-var isDragging=false,dragStart={x:0,y:0},panStart={x:0,y:0};
-var pinchDist=0,pinchScale=1;
+// NO PAN/ZOOM — field auto-scales to fit
+var tileMap={}; // map "col,row,layer" -> tile object for fast click detection
 
-// ===== PIXI INIT =====
 app=new PIXI.Application({width:window.innerWidth,height:window.innerHeight,backgroundColor:0x000000,resolution:window.devicePixelRatio||1,autoDensity:true});
 document.body.appendChild(app.view);
 stage=app.stage;
@@ -82,18 +73,28 @@ function calcSizes(){
   SW=window.innerWidth;SH=window.innerHeight;
   TOP_H=Math.max(SH*0.07,38);
   BBAR_H=Math.max(SH*0.06,36);
-  SHELF_H=Math.max(SH*0.17,68);
+  SHELF_H=Math.max(SH*0.14,58);
   FIELD_H=SH-TOP_H-BBAR_H-SHELF_H;
-  // Vertical rectangle tiles
-  TW=Math.min((SW-40)/5, FIELD_H*0.22);
-  TH=TW*1.35;
-  // Shelf slots: must fit max 8 across the screen width
-  SLOT_W=Math.min(TW*0.92, (SW-20)/8-4);
-  SLOT_H=SLOT_W/0.92*1.35*0.85;
-  GRID_GAP_X=Math.max(TW*0.2,12);
-  GRID_GAP_Y=Math.max(TH*0.15,10);
-  // Reset pan/zoom
-  panZoom={x:0,y:0,scale:1,minScale:0.5,maxScale:2.5};
+  
+  // Auto-scale tiles to fit field area
+  // Max 5 columns, max rows depends on tile count
+  var cols=Math.min(5,levelConfig.types);
+  var totalTiles=levelConfig.types*levelConfig.perType;
+  var rows=Math.ceil(totalTiles/cols/levelConfig.layers)+levelConfig.layers;
+  
+  // Tile size = fit both width and height
+  var maxTileW=(SW-20)/cols/1.4; // 1.4 = 1 + gap ratio
+  var maxTileH=(FIELD_H-20)/rows/1.3;
+  var tileBase=Math.min(maxTileW,maxTileH);
+  TW=tileBase;
+  TH=TW*1.4;
+  
+  // Shelf slots — fit 8 across width
+  SLOT_W=(SW-20)/8-3;
+  SLOT_H=SLOT_W*1.4;
+  
+  // If slot is too tall for shelf, constrain
+  if(SLOT_H>SHELF_H-8){SLOT_H=SHELF_H-8;SLOT_W=SLOT_H/1.4}
 }
 calcSizes();
 
@@ -104,77 +105,11 @@ window.addEventListener('resize',function(){
   if(screenState==='menu')drawMenu();
 });
 
-// ===== PAN/ZOOM HANDLERS =====
-function getFieldArea(){return{x:0,y:TOP_H+BBAR_H,w:SW,h:FIELD_H}}
-
-stage.on('pointerdown',function(e){
-  if(screenState!=='play')return;
-  var fa=getFieldArea();
-  var gy=e.global.y;
-  if(gy<fa.y||gy>fa.y+fa.h)return;
-  isDragging=true;
-  dragStart={x:e.global.x,y:e.global.y};
-  panStart={x:panZoom.x,y:panZoom.y};
-});
-
-stage.on('pointermove',function(e){
-  if(!isDragging)return;
-  var dx=e.global.x-dragStart.x;
-  var dy=e.global.y-dragStart.y;
-  if(Math.abs(dx)>3||Math.abs(dy)>3){
-    panZoom.x=panStart.x+dx/panZoom.scale;
-    panZoom.y=panStart.y+dy/panZoom.scale;
-    applyPanZoom();
-  }
-});
-
-stage.on('pointerup',function(){isDragging=false});
-stage.on('pointerupoutside',function(){isDragging=false});
-
-// Pinch zoom (touch)
-var lastTouches=[];
-stage.on('touchstart',function(e){
-  lastTouches=e.data.originalEvent.touches?Array.from(e.data.originalEvent.touches):[];
-});
-stage.on('touchmove',function(e){
-  if(screenState!=='play')return;
-  var touches=e.data.originalEvent.touches?Array.from(e.data.originalEvent.touches):[];
-  if(touches.length===2&&lastTouches.length===2){
-    var d=Math.hypot(touches[0].clientX-touches[1].clientX,touches[0].clientY-touches[1].clientY);
-    var ld=Math.hypot(lastTouches[0].clientX-lastTouches[1].clientX,lastTouches[0].clientY-lastTouches[1].clientY);
-    if(ld>0){
-      var newScale=panZoom.scale*(d/ld);
-      newScale=Math.max(panZoom.minScale,Math.min(panZoom.maxScale,newScale));
-      panZoom.scale=newScale;
-      applyPanZoom();
-    }
-    lastTouches=touches;
-    e.data.originalEvent.preventDefault();
-  }
-});
-
-// Mouse wheel zoom
-document.addEventListener('wheel',function(e){
-  if(screenState!=='play')return;
-  var factor=e.deltaY>0?0.92:1.08;
-  panZoom.scale=Math.max(panZoom.minScale,Math.min(panZoom.maxScale,panZoom.scale*factor));
-  applyPanZoom();
-  e.preventDefault();
-},{passive:false});
-
-function applyPanZoom(){
-  if(!fieldInner)return;
-  var ft=TOP_H+BBAR_H;
-  fieldInner.scale.set(panZoom.scale);
-  fieldInner.x=panZoom.x*panZoom.scale;
-  fieldInner.y=ft+panZoom.y*panZoom.scale;
-}
-
 // ===== EDITOR =====
 function toggleEditor(){var p=document.getElementById('editor-panel');p.style.display=p.style.display==='none'?'block':'none'}
 document.addEventListener('keydown',function(e){if(e.key==='e'||e.key==='E')toggleEditor()});
 ['types','layers','pertype','boosters'].forEach(function(k){var sl=document.getElementById('sl-'+k);sl.oninput=function(){document.getElementById('val-'+k).textContent=this.value}});
-function applyEditor(){levelConfig.types=+document.getElementById('sl-types').value;levelConfig.layers=+document.getElementById('sl-layers').value;levelConfig.perType=+document.getElementById('sl-pertype').value;levelConfig.boosters=+document.getElementById('sl-boosters').value;boosterCounts={undo:levelConfig.boosters,shuffle:levelConfig.boosters,extraSlot:levelConfig.boosters,hint:levelConfig.boosters};toggleEditor();startGame()}
+function applyEditor(){levelConfig.types=+document.getElementById('sl-types').value;levelConfig.layers=+document.getElementById('sl-layers').value;levelConfig.perType=+document.getElementById('sl-pertype').value;levelConfig.boosters=+document.getElementById('sl-boosters').value;boosterCounts={undo:levelConfig.boosters,shuffle:levelConfig.boosters,extraSlot:levelConfig.boosters,hint:levelConfig.boosters};toggleEditor();calcSizes();startGame()}
 function exportJSON(){var b=new Blob([JSON.stringify(levelConfig,null,2)],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tile-match-config.json';a.click()}
 function importJSON(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(ev){levelConfig=JSON.parse(ev.target.result);applyEditor()};r.readAsText(f)}
 
@@ -229,36 +164,34 @@ app.ticker.add(function(){if(screenState==='win')confettiParticles.forEach(funct
 
 // ===== GAME LOGIC =====
 function generateTiles(){
-  tiles=[];var total=levelConfig.types*levelConfig.perType;
+  tiles=[];tileMap={};
+  var total=levelConfig.types*levelConfig.perType;
   var types=[];for(var t=0;t<levelConfig.types;t++)for(var j=0;j<levelConfig.perType;j++)types.push(t);
   for(var i=types.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var tmp=types[i];types[i]=types[j];types[j]=tmp}
-  var cols=Math.min(Math.floor((SW-GRID_GAP_X*2)/(TW+GRID_GAP_X)),5);
+  var cols=Math.min(Math.floor((SW-20)/(TW*1.4)),5);
   var idx=0;
   for(var layer=0;layer<levelConfig.layers;layer++){
     var count=Math.ceil(total/levelConfig.layers);
-    for(var i=0;i<count&&idx<total;i++){var r=Math.floor(i/cols);var c=i%cols;tiles.push({type:types[idx],layer:layer,col:c,row:r,removed:false,sprite:null});idx++}
+    for(var i=0;i<count&&idx<total;i++){
+      var r=Math.floor(i/cols);var c=i%cols;
+      var tile={type:types[idx],layer:layer,col:c,row:r,removed:false,sprite:null};
+      tiles.push(tile);
+      tileMap[c+','+r+','+layer]=tile;
+      idx++;
+    }
   }
 }
 
-function getStackX(col){return col*(TW+GRID_GAP_X)+GRID_GAP_X}
-function getStackY(row){return row*(TH+GRID_GAP_Y*0.5)+GRID_GAP_Y}
-function getLayerOX(l){return l*3}
-function getLayerOY(l){return -l*5}
-
 function isBlocked(tile){
+  // A tile is blocked if any tile with HIGHER layer overlaps it
   for(var i=0;i<tiles.length;i++){
-    var t=tiles[i];if(t===tile||t.removed||t.layer<=tile.layer)continue;
-    // Must be same or adjacent stack
-    if(Math.abs(tile.col-t.col)>1||Math.abs(tile.row-t.row)>1)continue;
-    // Check real pixel overlap
-    var ax=getStackX(tile.col)+getLayerOX(tile.layer);
-    var ay=getStackY(tile.row)+getLayerOY(tile.layer);
-    var bx=getStackX(t.col)+getLayerOX(t.layer);
-    var by=getStackY(t.row)+getLayerOY(t.layer);
-    // Generous overlap check — both X and Y must overlap significantly
-    var overlapX=Math.abs(ax-bx)<TW*0.7;
-    var overlapY=ay<by+TH*0.5&&by<ay+TH*0.5;
-    if(overlapX&&overlapY)return true;
+    var t=tiles[i];
+    if(t===tile||t.removed||t.layer<=tile.layer)continue;
+    // Same stack position (same col/row) — always blocked by higher layer
+    if(t.col===tile.col&&t.row===tile.row)return true;
+    // Adjacent stack — check if visually overlapping
+    // With our big gaps, tiles in different stacks should NOT block each other
+    // Only same col+row with higher layer blocks
   }
   return false;
 }
@@ -267,68 +200,124 @@ function checkTriple(){for(var t=0;t<10;t++){var m=shelfItems.filter(function(s)
 function checkLose(){if(shelfItems.filter(function(s){return s!==null}).length>=maxShelf){screenState='lose';drawLose()}}
 function checkWin(){if(tiles.filter(function(t){return!t.removed}).length===0){screenState='win';drawWin()}}
 
-// ===== BOOSTERS =====
 function boosterUndo(){if(boosterCounts.undo<=0||undoStack.length===0)return;boosterCounts.undo--;var last=undoStack.pop();if(!last)return;last.tile.removed=false;shelfItems[last.shelfIdx]=null;rebuildPlayScreen()}
 function boosterShuffle(){if(boosterCounts.shuffle<=0)return;boosterCounts.shuffle--;var rem=tiles.filter(function(t){return!t.removed});var types=rem.map(function(t){return t.type});for(var i=types.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var tmp=types[i];types[i]=types[j];types[j]=tmp}rem.forEach(function(t,i){t.type=types[i]});rebuildPlayScreen()}
 function boosterExtraSlot(){if(boosterCounts.extraSlot<=0)return;boosterCounts.extraSlot--;maxShelf=8;rebuildPlayScreen()}
 function boosterHint(){if(boosterCounts.hint<=0)return;boosterCounts.hint--;var found=null;for(var t=0;t<10&&!found;t++){if(shelfItems.filter(function(s){return s&&s._tileType===t}).length>=2)found=tiles.find(function(tile){return!tile.removed&&tile.type===t&&!isBlocked(tile)})}if(!found)found=tiles.find(function(t){return!t.removed&&!isBlocked(t)});if(found&&found.sprite)animatePulse(found.sprite);setTimeout(function(){if(found&&found.sprite)stopPulse(found.sprite)},3000)}
 
-// ===== CLICK =====
+// ===== CLICK — simple direct approach =====
 function onTileClick(tile){
   if(animating||screenState!=='play')return;
-  if(isBlocked(tile)){if(tile.sprite)animateShake(tile.sprite);return}
+  if(isBlocked(tile)){
+    if(tile.sprite)animateShake(tile.sprite);
+    return;
+  }
   var slotIdx=-1;for(var i=0;i<maxShelf;i++){if(shelfItems[i]===null){slotIdx=i;break}}
   if(slotIdx===-1){checkLose();return}
   if(shelfItems.filter(function(s){return s!==null}).length>=maxShelf){checkLose();return}
   tile.removed=true;animating=true;
   undoStack.push({tile:tile,shelfIdx:slotIdx});
 
-  // Get sprite's GLOBAL position for animation
   var sp=tile.sprite;
-  var globalPos=sp.getGlobalPosition();
-  var fromX=globalPos.x;var fromY=globalPos.y;
+  var fromX=sp.x+fieldContainer.x;var fromY=sp.y+fieldContainer.y;
 
-  // Press: shrink → grow → fly
+  // Press effect then fly
   animateScale(sp,1,0.85,80,function(){
     animateScale(sp,0.85,1.1,100,function(){
       var fly=makeTileSprite(tile.type,false,SLOT_W,SLOT_H);
-      fly.x=fromX;fly.y=fromY;
-      fly.scale.set(TW/SLOT_W*panZoom.scale,TH/SLOT_H*panZoom.scale);
+      fly.x=fromX+(TW-SLOT_W)/2;fly.y=fromY;
       flyLayer.addChild(fly);
       sp.visible=false;
 
-      var shelfStartX=(SW-maxShelf*(SLOT_W+4))/2;
-      var targetX=shelfStartX+slotIdx*(SLOT_W+4);
+      var shelfStartX=(SW-maxShelf*(SLOT_W+3))/2;
+      var targetX=shelfStartX+slotIdx*(SLOT_W+3);
       var targetY=SH-SHELF_H+(SHELF_H-SLOT_H)/2;
 
-      animateMove(fly,fly.x,fly.y,targetX,targetY,280,function(){
-        fly.scale.set(1);
-        shelfItems[slotIdx]=fly;
-        fly.x=targetX;fly.y=targetY;
-        shelfContainer.addChild(fly);
-        flyLayer.removeChild(fly);
-        animating=false;
-        checkTriple();
-        setTimeout(function(){checkLose()},350);
-        refreshBlockedStates();
-      });
+      // Animate move + shrink
+      var dur=300;var s=performance.now();
+      var sx0=1,sy0=1;var sx1=SLOT_W/TW,sy1=SLOT_H/TH;
+
+      function flyTick(){
+        var t=Math.min((performance.now()-s)/dur,1);
+        var e=easeOutCubic(t);
+        var csx=sx0+(sx1-sx0)*e;
+        var csy=sy0+(sy1-sy0)*e;
+        fly.scale.set(csx,csy);
+        var cx=fromX+(TW/2)+(targetX+SLOT_W/2-fromX-TW/2)*e;
+        var cy=fromY+TH/2+(targetY+SLOT_H/2-fromY-TH/2)*e;
+        fly.x=cx-(SLOT_W*csx)/2;
+        fly.y=cy-(SLOT_H*csy)/2;
+        if(t<1)requestAnimationFrame(flyTick);
+        else{
+          shelfItems[slotIdx]=fly;
+          fly.x=targetX;fly.y=targetY;
+          fly.scale.set(sx1,sy1);
+          shelfContainer.addChild(fly);
+          flyLayer.removeChild(fly);
+          animating=false;
+          checkTriple();
+          setTimeout(function(){checkLose()},350);
+          // Rebuild entire field to fix blocked states
+          rebuildFieldTiles();
+        }
+      }
+      requestAnimationFrame(flyTick);
     });
   });
 }
 
-function refreshBlockedStates(){
-  tiles.forEach(function(tile){
-    if(tile.removed||!tile.sprite)return;
+// Rebuild ONLY the field tiles (preserving shelf)
+function rebuildFieldTiles(){
+  if(!fieldContainer)return;
+  fieldContainer.removeChildren();
+  
+  var ft=TOP_H+BBAR_H;
+  // Field BG
+  var fbg=new PIXI.Graphics();fbg.beginFill(0xF5F0E8);fbg.drawRect(0,0,SW,FIELD_H);fbg.endFill();
+  fbg.y=ft;fieldContainer.addChild(fbg);
+
+  // Calculate positions — auto-fit
+  var activeTiles=tiles.filter(function(t){return!t.removed});
+  var maxCol=0,maxRow=0;
+  activeTiles.forEach(function(t){if(t.col>maxCol)maxCol=t.col;if(t.row>maxRow)maxRow=t.row});
+  
+  var gapX=TW*0.4;var gapY=TH*0.3;
+  var contentW=(maxCol+1)*TW+maxCol*gapX;
+  var contentH=(maxRow+1)*TH+maxRow*gapY;
+  var offX=(SW-contentW)/2;
+  var offY=ft+(FIELD_H-contentH)/2;
+
+  var layerOX=3;var layerOY=-5;
+
+  activeTiles.forEach(function(tile){
     var blocked=isBlocked(tile);
-    tile.sprite.alpha=blocked?0.5:1;
-    tile.sprite._blocked=blocked;
-    tile.sprite.eventMode=blocked?'none':'static';
-    tile.sprite.cursor=blocked?'default':'pointer';
+    var sp=makeTileSprite(tile.type,blocked,TW,TH);
+    sp.x=offX+tile.col*(TW+gapX)+tile.layer*layerOX;
+    sp.y=offY+tile.row*(TH+gapY)+tile.layer*layerOY;
+    
+    if(!blocked){
+      sp.eventMode='static';
+      sp.cursor='pointer';
+      // Direct click handler — simple and reliable
+      (function(t){
+        sp.on('pointertap',function(){
+          onTileClick(t);
+        });
+      })(tile);
+    }
+    
+    tile.sprite=sp;
+    fieldContainer.addChild(sp);
   });
 }
 
+function refreshBlockedStates(){
+  // Rebuild field — this guarantees correct interactive state
+  rebuildFieldTiles();
+}
+
 // ===== SCREENS =====
-function clearAll(){stage.removeChildren();fieldContainer=null;fieldInner=null;shelfContainer=null;topBar=null;flyLayer=null;confettiParticles.forEach(function(p){p.parent&&p.parent.removeChild(p)});confettiParticles=[]}
+function clearAll(){stage.removeChildren();fieldContainer=null;shelfContainer=null;topBar=null;flyLayer=null;confettiParticles.forEach(function(p){p.parent&&p.parent.removeChild(p)});confettiParticles=[]}
 
 function drawMenu(){
   clearAll();screenState='menu';
@@ -337,38 +326,31 @@ function drawMenu(){
   var t=new PIXI.Text('Tile Match',{fontSize:Math.min(SW*0.14,52),fill:0xFFFFFF,fontWeight:'bold'});t.anchor.set(0.5);t.x=SW/2;t.y=SH*0.25;c.addChild(t);
   var s=new PIXI.Text('Triple Puzzle',{fontSize:Math.min(SW*0.08,28),fill:0xF1C40F,fontWeight:'bold'});s.anchor.set(0.5);s.x=SW/2;s.y=SH*0.33;c.addChild(s);
   var bw=SW*0.6;var bh=SW*0.12;
-  c.addChild(makeButton('▶ Play',0x27AE60,bw,bh,function(){startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.5;
-  c.addChild(makeButton('🔧 Editor',0x2980B9,bw,bh,function(){toggleEditor()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.5+bh*1.5;
+  var pb=makeButton('▶ Play',0x27AE60,bw,bh,function(){startGame()});pb.x=(SW-bw)/2;pb.y=SH*0.5;c.addChild(pb);
+  var eb=makeButton('🔧 Editor',0x2980B9,bw,bh,function(){toggleEditor()});eb.x=(SW-bw)/2;eb.y=SH*0.5+bh*1.5;c.addChild(eb);
 }
 
 function startGame(){
   clearAll();screenState='play';score=0;maxShelf=7;undoStack=[];shelfItems=[];
   for(var i=0;i<8;i++)shelfItems.push(null);
   boosterCounts={undo:levelConfig.boosters,shuffle:levelConfig.boosters,extraSlot:levelConfig.boosters,hint:levelConfig.boosters};
-  generateTiles();
-  panZoom={x:0,y:0,scale:1,minScale:0.5,maxScale:2.5};
-  rebuildPlayScreen();
+  generateTiles();rebuildPlayScreen();
 }
 
 function rebuildPlayScreen(){
   stage.removeChildren();confettiParticles=[];
   fieldContainer=new PIXI.Container();fieldContainer.zIndex=1;
-  fieldInner=new PIXI.Container(); // pan/zoom container inside field
-  fieldContainer.addChild(fieldInner);
-  // Clip field area
-  fieldContainer.eventMode='static';
-
   shelfContainer=new PIXI.Container();shelfContainer.zIndex=2;
   flyLayer=new PIXI.Container();flyLayer.zIndex=10;
   topBar=new PIXI.Container();topBar.zIndex=5;
   stage.addChild(fieldContainer);stage.addChild(shelfContainer);stage.addChild(flyLayer);stage.addChild(topBar);
 
-  // ===== TOP BAR =====
+  // TOP BAR
   topBar.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x1A1A2E,0.92);g.drawRect(0,0,SW,TOP_H);g.endFill();return g})());
   var st=new PIXI.Text('⭐ '+score,{fontSize:Math.min(SW*0.04,16),fill:0xF1C40F,fontWeight:'bold'});st.x=SW/2;st.y=TOP_H/2;st.anchor.set(0.5);st._isScore=true;topBar.addChild(st);
   var btnH=TOP_H*0.7;
-  var pb=makeButton('⏸',0x7F8C8D,btnH,btnH,function(){drawMenu()});pb.x=SW-btnH-6;pb.y=(TOP_H-btnH)/2;topBar.addChild(pb);
-  var eb=makeButton('🔧',0x555,btnH,btnH,function(){toggleEditor()});eb.x=6;eb.y=(TOP_H-btnH)/2;topBar.addChild(eb);
+  topBar.addChild(makeButton('⏸',0x7F8C8D,btnH,btnH,function(){drawMenu()}));topBar.children[topBar.children.length-1].x=SW-btnH-6;topBar.children[topBar.children.length-1].y=(TOP_H-btnH)/2;
+  topBar.addChild(makeButton('🔧',0x555,btnH,btnH,function(){toggleEditor()}));topBar.children[topBar.children.length-1].x=6;topBar.children[topBar.children.length-1].y=(TOP_H-btnH)/2;
 
   // Booster bar
   topBar.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x16213E,0.85);g.drawRect(0,TOP_H,SW,BBAR_H);g.endFill();return g})());
@@ -377,57 +359,32 @@ function rebuildPlayScreen(){
     var btn=makeButton(b.text,b.color,bbw,bbh,b.fn);btn.x=startX+i*(bbw+4);btn.y=TOP_H+4;topBar.addChild(btn);
   });
 
-  // ===== FIELD BG (static, behind pan/zoom) =====
-  var ft=TOP_H+BBAR_H;
-  var fbg=new PIXI.Graphics();fbg.beginFill(0xF5F0E8);fbg.drawRect(0,ft,SW,FIELD_H);fbg.endFill();
-  stage.addChild(fbg); // behind everything, at y=ft
+  // FIELD — auto-fit tiles
+  rebuildFieldTiles();
 
-  // ===== FIELD INNER (pan/zoom content) =====
-  var activeTiles=tiles.filter(function(t){return!t.removed});
-  var maxCol=0,maxRow=0;
-  activeTiles.forEach(function(t){if(t.col>maxCol)maxCol=t.col;if(t.row>maxRow)maxRow=t.row});
-  var contentW=(maxCol+1)*(TW+GRID_GAP_X)+GRID_GAP_X;
-  var contentH=(maxRow+1)*(TH+GRID_GAP_Y*0.5)+GRID_GAP_Y+TH*0.1;
-  var offX=Math.max((SW-contentW)/2,GRID_GAP_X);
-  var offY=GRID_GAP_Y;
-
-  activeTiles.forEach(function(tile){
-    var blocked=isBlocked(tile);
-    var sp=makeTileSprite(tile.type,blocked,TW,TH);
-    sp.x=getStackX(tile.col)+offX+getLayerOX(tile.layer);
-    sp.y=getStackY(tile.row)+offY+getLayerOY(tile.layer);
-    if(!blocked){sp.eventMode='static';sp.cursor='pointer';sp.on('pointerdown',function(e){onTileClick(tile)})}
-    tile.sprite=sp;fieldInner.addChild(sp);
-  });
-
-  // Center fieldInner in field area
-  fieldInner.x=0;fieldInner.y=ft;
-  panZoom={x:0,y:0,scale:1,minScale:0.5,maxScale:2.5};
-  applyPanZoom();
-
-  // ===== SHELF =====
-  var sbg=new PIXI.Graphics();sbg.beginFill(0x8B6F47);sbg.drawRect(0,SH-SHELF_H,SW,SHELF_H);sbg.endFill();shelfContainer.addChild(sbg);
-  var shelfStartX=(SW-maxShelf*(SLOT_W+4))/2;
-  for(var i=0;i<maxShelf;i++){var sl=makeSlotSprite();sl.x=shelfStartX+i*(SLOT_W+4);sl.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2;shelfContainer.addChild(sl)}
+  // SHELF
+  shelfContainer.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x8B6F47);g.drawRect(0,SH-SHELF_H,SW,SHELF_H);g.endFill();return g})());
+  var shelfStartX=(SW-maxShelf*(SLOT_W+3))/2;
+  for(var i=0;i<maxShelf;i++){var sl=makeSlotSprite();sl.x=shelfStartX+i*(SLOT_W+3);sl.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2;shelfContainer.addChild(sl)}
   shelfItems.forEach(function(item,idx){
     if(!item)return;
-    item.x=shelfStartX+idx*(SLOT_W+4);item.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2;item.scale.set(1);
+    item.x=shelfStartX+idx*(SLOT_W+3);item.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2;item.scale.set(1);
     shelfContainer.addChild(item);
   });
 }
 
-function rebuildShelfVisuals(){var shelfStartX=(SW-maxShelf*(SLOT_W+4))/2;shelfItems.forEach(function(item,idx){if(!item)return;item.x=shelfStartX+idx*(SLOT_W+4);item.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2})}
+function rebuildShelfVisuals(){var shelfStartX=(SW-maxShelf*(SLOT_W+3))/2;shelfItems.forEach(function(item,idx){if(!item)return;item.x=shelfStartX+idx*(SLOT_W+3);item.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2})}
 function updateScoreText(){if(!topBar)return;topBar.children.forEach(function(c){if(c._isScore)c.text='⭐ '+score})}
 
 function drawWin(){
   clearAll();screenState='win';
   var c=new PIXI.Container();c.zIndex=0;stage.addChild(c);
   c.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x000000,0.6);g.drawRect(0,0,SW,SH);g.endFill();return g})());
-  var t=new PIXI.Text('🎉 Victory!',{fontSize:Math.min(SW*0.12,48),fill:0x2ECC71,fontWeight:'bold'});t.anchor.set(0.5);t.x=SW/2;t.y=SH*0.3;c.addChild(t);
+  c.addChild((function(){var t=new PIXI.Text('🎉 Victory!',{fontSize:Math.min(SW*0.12,48),fill:0x2ECC71,fontWeight:'bold'});t.anchor.set(0.5);t.x=SW/2;t.y=SH*0.3;return t})());
   c.addChild((function(){var s=new PIXI.Text('Score: '+score,{fontSize:Math.min(SW*0.07,28),fill:0xF1C40F,fontWeight:'bold'});s.anchor.set(0.5);s.x=SW/2;s.y=SH*0.42;return s})());
   var bw=SW*0.5;var bh=SW*0.1;
-  var nb=makeButton('Next Level ▶',0x27AE60,bw,bh,function(){level++;levelConfig.types=Math.min(levelConfig.types+1,15);levelConfig.layers=Math.min(levelConfig.layers+1,5);startGame()});nb.x=(SW-bw)/2;nb.y=SH*0.55;c.addChild(nb);
-  var mb=makeButton('🏠 Menu',0x2980B9,bw,bh,function(){drawMenu()});mb.x=(SW-bw)/2;mb.y=SH*0.55+bh*1.4;c.addChild(mb);
+  c.addChild(makeButton('Next Level ▶',0x27AE60,bw,bh,function(){level++;levelConfig.types=Math.min(levelConfig.types+1,15);levelConfig.layers=Math.min(levelConfig.layers+1,5);calcSizes();startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55;
+  c.addChild(makeButton('🏠 Menu',0x2980B9,bw,bh,function(){drawMenu()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55+bh*1.4;
   spawnConfetti();
 }
 
@@ -438,15 +395,9 @@ function drawLose(){
   var i=0;function sh(){if(i>=6){c.x=0;return}c.x=i%2===0?8:-8;i++;setTimeout(sh,60)}sh();
   c.addChild((function(){var t=new PIXI.Text('😢 Shelf Full!',{fontSize:Math.min(SW*0.1,42),fill:0xE74C3C,fontWeight:'bold'});t.anchor.set(0.5);t.x=SW/2;t.y=SH*0.28;return t})());
   var bw=SW*0.5;var bh=SW*0.1;
-  var rb=makeButton('🔄 Retry',0xE67E22,bw,bh,function(){startGame()});rb.x=(SW-bw)/2;rb.y=SH*0.45;c.addChild(rb);
-  var ub=makeButton('↩ Use Undo',0x8E44AD,bw,bh,function(){boosterCounts.undo=Math.max(boosterCounts.undo,1);boosterUndo();if(shelfItems.filter(function(s){return s!==null}).length<maxShelf)startGame()});ub.x=(SW-bw)/2;ub.y=SH*0.45+bh*1.3;c.addChild(ub);
-  var mb=makeButton('🏠 Menu',0x2980B9,bw,bh,function(){drawMenu()});mb.x=(SW-bw)/2;mb.y=SH*0.45+bh*2.6;c.addChild(mb);
-}
-
-drawMenu();
-</script>
-</body>
-</html>+bh*2.6;c.addChild(mb);
+  c.addChild(makeButton('🔄 Retry',0xE67E22,bw,bh,function(){startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.45;
+  c.addChild(makeButton('↩ Use Undo',0x8E44AD,bw,bh,function(){boosterCounts.undo=Math.max(boosterCounts.undo,1);boosterUndo();if(shelfItems.filter(function(s){return s!==null}).length<maxShelf)startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55;
+  c.addChild(makeButton('🏠 Menu',0x2980B9,bw,bh,function(){drawMenu()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.65;
 }
 
 drawMenu();
