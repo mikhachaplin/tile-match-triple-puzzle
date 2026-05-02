@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
@@ -20,26 +20,26 @@ canvas{display:block;position:fixed;top:0;left:0}
 </head>
 <body>
 <div id="editor-panel">
-<h2>🔧 Level Editor</h2>
-<label>Tile Types: <span class="val" id="val-types">8</span></label>
+<h2>🔧 Редактор уровней</h2>
+<label>Типы карточек: <span class="val" id="val-types">8</span></label>
 <input type="range" id="sl-types" min="5" max="15" value="8">
-<label>Layers: <span class="val" id="val-layers">2</span></label>
+<label>Слои: <span class="val" id="val-layers">2</span></label>
 <input type="range" id="sl-layers" min="1" max="5" value="2">
-<label>Tiles per Type: <span class="val" id="val-pertype">6</span></label>
+<label>Карточек на тип: <span class="val" id="val-pertype">6</span></label>
 <input type="range" id="sl-pertype" min="3" max="12" step="3" value="6">
-<label>Boosters: <span class="val" id="val-boosters">3</span></label>
+<label>Бустеры: <span class="val" id="val-boosters">3</span></label>
 <input type="range" id="sl-boosters" min="0" max="10" value="3">
 <div class="btn-row">
-<button class="btn-apply" onclick="applyEditor()">Apply</button>
-<button class="btn-export" onclick="exportJSON()">Export JSON</button>
-<button class="btn-import" onclick="document.getElementById('importFile').click()">Import JSON</button>
-<button class="btn-close" onclick="toggleEditor()">Close</button>
+<button class="btn-apply" onclick="applyEditor()">Применить</button>
+<button class="btn-export" onclick="exportJSON()">Экспорт JSON</button>
+<button class="btn-import" onclick="document.getElementById('importFile').click()">Импорт JSON</button>
+<button class="btn-close" onclick="toggleEditor()">Закрыть</button>
 <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)">
 </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/pixi.js@7/dist/pixi.min.js"></script>
 <script>
-(function(){var p=prompt('Enter password:');if(btoa(p||'')!==btoa('tile123'))location.reload()})();
+(function(){var p=prompt('Пароль:');if(btoa(p||'')!==btoa('tile123'))location.reload()})();
 
 function easeOutCubic(t){return 1-Math.pow(1-t,3)}
 function easeOutBack(t){var c1=1.70158,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2)}
@@ -59,9 +59,8 @@ var confettiParticles=[];
 
 var SW,SH,TW,TH,SLOT_W,SLOT_H;
 var TOP_H,BBAR_H,FIELD_H,SHELF_H;
-
-// NO PAN/ZOOM — field auto-scales to fit
-var tileMap={}; // map "col,row,layer" -> tile object for fast click detection
+// Field layout — calculated ONCE at level start, never changes during play
+var fieldLayout={offX:0,offY:0,gapX:0,gapY:0,cols:0};
 
 app=new PIXI.Application({width:window.innerWidth,height:window.innerHeight,backgroundColor:0x000000,resolution:window.devicePixelRatio||1,autoDensity:true});
 document.body.appendChild(app.view);
@@ -76,24 +75,19 @@ function calcSizes(){
   SHELF_H=Math.max(SH*0.14,58);
   FIELD_H=SH-TOP_H-BBAR_H-SHELF_H;
   
-  // Auto-scale tiles to fit field area
-  // Max 5 columns, max rows depends on tile count
   var cols=Math.min(5,levelConfig.types);
   var totalTiles=levelConfig.types*levelConfig.perType;
   var rows=Math.ceil(totalTiles/cols/levelConfig.layers)+levelConfig.layers;
   
-  // Tile size = fit both width and height
-  var maxTileW=(SW-20)/cols/1.4; // 1.4 = 1 + gap ratio
-  var maxTileH=(FIELD_H-20)/rows/1.3;
+  var gapRatioX=0.4;var gapRatioY=0.3;
+  var maxTileW=(SW-20)/(cols*(1+gapRatioX));
+  var maxTileH=(FIELD_H-20)/(rows*(1+gapRatioY));
   var tileBase=Math.min(maxTileW,maxTileH);
   TW=tileBase;
   TH=TW*1.4;
   
-  // Shelf slots — fit 8 across width
   SLOT_W=(SW-20)/8-3;
   SLOT_H=SLOT_W*1.4;
-  
-  // If slot is too tall for shelf, constrain
   if(SLOT_H>SHELF_H-8){SLOT_H=SHELF_H-8;SLOT_W=SLOT_H/1.4}
 }
 calcSizes();
@@ -140,7 +134,6 @@ function makeButton(text,color,w,h,cb){
 }
 
 // ===== ANIMATIONS =====
-function animateMove(obj,fx,fy,tx,ty,dur,cb){var s=performance.now();function tick(){var t=Math.min((performance.now()-s)/dur,1);var e=easeOutCubic(t);obj.x=fx+(tx-fx)*e;obj.y=fy+(ty-fy)*e;if(t<1)requestAnimationFrame(tick);else{obj.x=tx;obj.y=ty;if(cb)cb()}}requestAnimationFrame(tick)}
 function animateScale(obj,from,to,dur,cb){var s=performance.now();function tick(){var t=Math.min((performance.now()-s)/dur,1);obj.scale.set(from+(to-from)*easeOutBack(t));if(t<1)requestAnimationFrame(tick);else{obj.scale.set(to);if(cb)cb()}}requestAnimationFrame(tick)}
 function animateShake(obj,cb){var ox=obj.x;var i=0;function step(){if(i>=6){obj.x=ox;if(cb)cb();return}obj.x=ox+(i%2===0?5:-5);i++;setTimeout(step,40)}step()}
 function animatePulse(obj){if(obj._pulsing)return;obj._pulsing=true;var s=performance.now();function tick(){if(!obj._pulsing)return;var t=((performance.now()-s)%600)/600;obj.scale.set(1+0.1*Math.sin(t*Math.PI*2));requestAnimationFrame(tick)}requestAnimationFrame(tick)}
@@ -164,34 +157,45 @@ app.ticker.add(function(){if(screenState==='win')confettiParticles.forEach(funct
 
 // ===== GAME LOGIC =====
 function generateTiles(){
-  tiles=[];tileMap={};
+  tiles=[];
   var total=levelConfig.types*levelConfig.perType;
   var types=[];for(var t=0;t<levelConfig.types;t++)for(var j=0;j<levelConfig.perType;j++)types.push(t);
   for(var i=types.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var tmp=types[i];types[i]=types[j];types[j]=tmp}
-  var cols=Math.min(Math.floor((SW-20)/(TW*1.4)),5);
+  var cols=fieldLayout.cols;
   var idx=0;
   for(var layer=0;layer<levelConfig.layers;layer++){
     var count=Math.ceil(total/levelConfig.layers);
     for(var i=0;i<count&&idx<total;i++){
       var r=Math.floor(i/cols);var c=i%cols;
-      var tile={type:types[idx],layer:layer,col:c,row:r,removed:false,sprite:null};
-      tiles.push(tile);
-      tileMap[c+','+r+','+layer]=tile;
+      tiles.push({type:types[idx],layer:layer,col:c,row:r,removed:false,sprite:null});
       idx++;
     }
   }
 }
 
+// Calculate field layout ONCE at level start
+function calcFieldLayout(){
+  var cols=Math.min(Math.floor((SW-20)/(TW*1.4)),5);
+  if(cols<1)cols=1;
+  var totalTiles=levelConfig.types*levelConfig.perType;
+  var rowsPerLayer=Math.ceil(totalTiles/cols/levelConfig.layers);
+  var totalRows=rowsPerLayer+levelConfig.layers-1;
+  
+  var gapX=TW*0.4;var gapY=TH*0.3;
+  var contentW=cols*TW+(cols-1)*gapX;
+  var contentH=totalRows*TH+(totalRows-1)*gapY;
+  var ft=TOP_H+BBAR_H;
+  var offX=(SW-contentW)/2;
+  var offY=ft+(FIELD_H-contentH)/2;
+  
+  fieldLayout={offX:offX,offY:offY,gapX:gapX,gapY:gapY,cols:cols};
+}
+
 function isBlocked(tile){
-  // A tile is blocked if any tile with HIGHER layer overlaps it
   for(var i=0;i<tiles.length;i++){
     var t=tiles[i];
     if(t===tile||t.removed||t.layer<=tile.layer)continue;
-    // Same stack position (same col/row) — always blocked by higher layer
     if(t.col===tile.col&&t.row===tile.row)return true;
-    // Adjacent stack — check if visually overlapping
-    // With our big gaps, tiles in different stacks should NOT block each other
-    // Only same col+row with higher layer blocks
   }
   return false;
 }
@@ -205,13 +209,10 @@ function boosterShuffle(){if(boosterCounts.shuffle<=0)return;boosterCounts.shuff
 function boosterExtraSlot(){if(boosterCounts.extraSlot<=0)return;boosterCounts.extraSlot--;maxShelf=8;rebuildPlayScreen()}
 function boosterHint(){if(boosterCounts.hint<=0)return;boosterCounts.hint--;var found=null;for(var t=0;t<10&&!found;t++){if(shelfItems.filter(function(s){return s&&s._tileType===t}).length>=2)found=tiles.find(function(tile){return!tile.removed&&tile.type===t&&!isBlocked(tile)})}if(!found)found=tiles.find(function(t){return!t.removed&&!isBlocked(t)});if(found&&found.sprite)animatePulse(found.sprite);setTimeout(function(){if(found&&found.sprite)stopPulse(found.sprite)},3000)}
 
-// ===== CLICK — simple direct approach =====
+// ===== TILE CLICK =====
 function onTileClick(tile){
   if(animating||screenState!=='play')return;
-  if(isBlocked(tile)){
-    if(tile.sprite)animateShake(tile.sprite);
-    return;
-  }
+  if(isBlocked(tile)){if(tile.sprite)animateShake(tile.sprite);return}
   var slotIdx=-1;for(var i=0;i<maxShelf;i++){if(shelfItems[i]===null){slotIdx=i;break}}
   if(slotIdx===-1){checkLose();return}
   if(shelfItems.filter(function(s){return s!==null}).length>=maxShelf){checkLose();return}
@@ -219,57 +220,51 @@ function onTileClick(tile){
   undoStack.push({tile:tile,shelfIdx:slotIdx});
 
   var sp=tile.sprite;
-  var fromX=sp.x+fieldContainer.x;var fromY=sp.y+fieldContainer.y;
+  var fromX=sp.x;var fromY=sp.y;
 
-  // Press effect then fly
   animateScale(sp,1,0.85,80,function(){
     animateScale(sp,0.85,1.1,100,function(){
       var fly=makeTileSprite(tile.type,false,SLOT_W,SLOT_H);
-      // Start: center of the tile on field
+      // Start: center of field tile
       var fieldCX=fromX+TW/2;
       var fieldCY=fromY+TH/2;
       fly.x=fieldCX-SLOT_W/2;
       fly.y=fieldCY-SLOT_H/2;
-      fly.scale.set(TW/SLOT_W,TH/SLOT_H); // start at field tile size
+      fly.scale.set(TW/SLOT_W,TH/SLOT_H);
       flyLayer.addChild(fly);
       sp.visible=false;
 
       var shelfStartX=(SW-maxShelf*(SLOT_W+3))/2;
       var targetX=shelfStartX+slotIdx*(SLOT_W+3);
       var targetY=SH-SHELF_H+(SHELF_H-SLOT_H)/2;
-      // Target center
       var targetCX=targetX+SLOT_W/2;
       var targetCY=targetY+SLOT_H/2;
 
-      // Animate: move center → center, shrink scale to 1
       var dur=300;var s=performance.now();
       var sx0=TW/SLOT_W,sy0=TH/SLOT_H;var sx1=1,sy1=1;
 
       function flyTick(){
         var t=Math.min((performance.now()-s)/dur,1);
         var e=easeOutCubic(t);
-        // Scale interpolation
         var csx=sx0+(sx1-sx0)*e;
         var csy=sy0+(sy1-sy0)*e;
         fly.scale.set(csx,csy);
-        // Center position interpolation: from center of field tile to center of shelf slot
         var cx=fieldCX+(targetCX-fieldCX)*e;
         var cy=fieldCY+(targetCY-fieldCY)*e;
-        // Position sprite so its center is at (cx, cy)
         fly.x=cx-(SLOT_W*csx)/2;
         fly.y=cy-(SLOT_H*csy)/2;
         if(t<1)requestAnimationFrame(flyTick);
         else{
           shelfItems[slotIdx]=fly;
           fly.x=targetX;fly.y=targetY;
-          fly.scale.set(1,1); // final size = slot size
+          fly.scale.set(1,1);
           shelfContainer.addChild(fly);
           flyLayer.removeChild(fly);
           animating=false;
+          // Update blocked states WITHOUT rebuilding layout
+          updateBlockedStates();
           checkTriple();
           setTimeout(function(){checkLose()},350);
-          // Rebuild entire field to fix blocked states
-          rebuildFieldTiles();
         }
       }
       requestAnimationFrame(flyTick);
@@ -277,54 +272,71 @@ function onTileClick(tile){
   });
 }
 
-// Rebuild ONLY the field tiles (preserving shelf)
-function rebuildFieldTiles(){
+// Update blocked states WITHOUT changing layout positions
+function updateBlockedStates(){
+  if(!fieldContainer)return;
+  var layerOX=3;var layerOY=-5;
+  // Multiple passes until stable
+  var changed=true;var passes=0;
+  while(changed&&passes<10){
+    changed=false;passes++;
+    tiles.forEach(function(tile){
+      if(tile.removed||!tile.sprite)return;
+      var blocked=isBlocked(tile);
+      if(tile.sprite._blocked!==blocked){
+        tile.sprite._blocked=blocked;
+        tile.sprite.alpha=blocked?0.5:1;
+        if(blocked){
+          tile.sprite.eventMode='none';
+          tile.sprite.cursor='default';
+        }else{
+          tile.sprite.eventMode='static';
+          tile.sprite.cursor='pointer';
+          // Re-attach click handler if needed
+          if(!tile.sprite._hasClick){
+            tile.sprite._hasClick=true;
+            (function(t){
+              tile.sprite.on('pointertap',function(){onTileClick(t)});
+            })(tile);
+          }
+        }
+        changed=true;
+      }
+    });
+  }
+}
+
+// Build field tiles using SAVED layout (no recalculation)
+function buildFieldTiles(){
   if(!fieldContainer)return;
   fieldContainer.removeChildren();
   
   var ft=TOP_H+BBAR_H;
-  // Field BG
   var fbg=new PIXI.Graphics();fbg.beginFill(0xF5F0E8);fbg.drawRect(0,0,SW,FIELD_H);fbg.endFill();
   fbg.y=ft;fieldContainer.addChild(fbg);
 
-  // Calculate positions — auto-fit
-  var activeTiles=tiles.filter(function(t){return!t.removed});
-  var maxCol=0,maxRow=0;
-  activeTiles.forEach(function(t){if(t.col>maxCol)maxCol=t.col;if(t.row>maxRow)maxRow=t.row});
-  
-  var gapX=TW*0.4;var gapY=TH*0.3;
-  var contentW=(maxCol+1)*TW+maxCol*gapX;
-  var contentH=(maxRow+1)*TH+maxRow*gapY;
-  var offX=(SW-contentW)/2;
-  var offY=ft+(FIELD_H-contentH)/2;
-
+  var L=fieldLayout;
   var layerOX=3;var layerOY=-5;
 
-  activeTiles.forEach(function(tile){
+  tiles.forEach(function(tile){
+    if(tile.removed)return;
     var blocked=isBlocked(tile);
     var sp=makeTileSprite(tile.type,blocked,TW,TH);
-    sp.x=offX+tile.col*(TW+gapX)+tile.layer*layerOX;
-    sp.y=offY+tile.row*(TH+gapY)+tile.layer*layerOY;
+    sp.x=L.offX+tile.col*(TW+L.gapX)+tile.layer*layerOX;
+    sp.y=L.offY+tile.row*(TH+L.gapY)+tile.layer*layerOY;
     
     if(!blocked){
       sp.eventMode='static';
       sp.cursor='pointer';
-      // Direct click handler — simple and reliable
+      sp._hasClick=true;
       (function(t){
-        sp.on('pointertap',function(){
-          onTileClick(t);
-        });
+        sp.on('pointertap',function(){onTileClick(t)});
       })(tile);
     }
     
     tile.sprite=sp;
     fieldContainer.addChild(sp);
   });
-}
-
-function refreshBlockedStates(){
-  // Rebuild field — this guarantees correct interactive state
-  rebuildFieldTiles();
 }
 
 // ===== SCREENS =====
@@ -337,15 +349,18 @@ function drawMenu(){
   var t=new PIXI.Text('Tile Match',{fontSize:Math.min(SW*0.14,52),fill:0xFFFFFF,fontWeight:'bold'});t.anchor.set(0.5);t.x=SW/2;t.y=SH*0.25;c.addChild(t);
   var s=new PIXI.Text('Triple Puzzle',{fontSize:Math.min(SW*0.08,28),fill:0xF1C40F,fontWeight:'bold'});s.anchor.set(0.5);s.x=SW/2;s.y=SH*0.33;c.addChild(s);
   var bw=SW*0.6;var bh=SW*0.12;
-  var pb=makeButton('▶ Play',0x27AE60,bw,bh,function(){startGame()});pb.x=(SW-bw)/2;pb.y=SH*0.5;c.addChild(pb);
-  var eb=makeButton('🔧 Editor',0x2980B9,bw,bh,function(){toggleEditor()});eb.x=(SW-bw)/2;eb.y=SH*0.5+bh*1.5;c.addChild(eb);
+  var pb=makeButton('▶ Играть',0x27AE60,bw,bh,function(){startGame()});pb.x=(SW-bw)/2;pb.y=SH*0.5;c.addChild(pb);
+  var eb=makeButton('🔧 Редактор',0x2980B9,bw,bh,function(){toggleEditor()});eb.x=(SW-bw)/2;eb.y=SH*0.5+bh*1.5;c.addChild(eb);
 }
 
 function startGame(){
   clearAll();screenState='play';score=0;maxShelf=7;undoStack=[];shelfItems=[];
   for(var i=0;i<8;i++)shelfItems.push(null);
   boosterCounts={undo:levelConfig.boosters,shuffle:levelConfig.boosters,extraSlot:levelConfig.boosters,hint:levelConfig.boosters};
-  generateTiles();rebuildPlayScreen();
+  calcSizes();      // Calculate tile/shelf sizes
+  calcFieldLayout(); // Calculate field layout ONCE
+  generateTiles();   // Generate tile data
+  rebuildPlayScreen();
 }
 
 function rebuildPlayScreen(){
@@ -370,8 +385,8 @@ function rebuildPlayScreen(){
     var btn=makeButton(b.text,b.color,bbw,bbh,b.fn);btn.x=startX+i*(bbw+4);btn.y=TOP_H+4;topBar.addChild(btn);
   });
 
-  // FIELD — auto-fit tiles
-  rebuildFieldTiles();
+  // FIELD — uses saved layout, NO recalculation
+  buildFieldTiles();
 
   // SHELF
   shelfContainer.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x8B6F47);g.drawRect(0,SH-SHELF_H,SW,SHELF_H);g.endFill();return g})());
@@ -391,11 +406,11 @@ function drawWin(){
   clearAll();screenState='win';
   var c=new PIXI.Container();c.zIndex=0;stage.addChild(c);
   c.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x000000,0.6);g.drawRect(0,0,SW,SH);g.endFill();return g})());
-  c.addChild((function(){var t=new PIXI.Text('🎉 Victory!',{fontSize:Math.min(SW*0.12,48),fill:0x2ECC71,fontWeight:'bold'});t.anchor.set(0.5);t.x=SW/2;t.y=SH*0.3;return t})());
-  c.addChild((function(){var s=new PIXI.Text('Score: '+score,{fontSize:Math.min(SW*0.07,28),fill:0xF1C40F,fontWeight:'bold'});s.anchor.set(0.5);s.x=SW/2;s.y=SH*0.42;return s})());
+  c.addChild((function(){var t=new PIXI.Text('🎉 Победа!',{fontSize:Math.min(SW*0.12,48),fill:0x2ECC71,fontWeight:'bold'});t.anchor.set(0.5);t.x=SW/2;t.y=SH*0.3;return t})());
+  c.addChild((function(){var s=new PIXI.Text('Счёт: '+score,{fontSize:Math.min(SW*0.07,28),fill:0xF1C40F,fontWeight:'bold'});s.anchor.set(0.5);s.x=SW/2;s.y=SH*0.42;return s})());
   var bw=SW*0.5;var bh=SW*0.1;
-  c.addChild(makeButton('Next Level ▶',0x27AE60,bw,bh,function(){level++;levelConfig.types=Math.min(levelConfig.types+1,15);levelConfig.layers=Math.min(levelConfig.layers+1,5);calcSizes();startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55;
-  c.addChild(makeButton('🏠 Menu',0x2980B9,bw,bh,function(){drawMenu()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55+bh*1.4;
+  c.addChild(makeButton('Следующий уровень ▶',0x27AE60,bw,bh,function(){level++;levelConfig.types=Math.min(levelConfig.types+1,15);levelConfig.layers=Math.min(levelConfig.layers+1,5);calcSizes();startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55;
+  c.addChild(makeButton('🏠 Меню',0x2980B9,bw,bh,function(){drawMenu()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55+bh*1.4;
   spawnConfetti();
 }
 
@@ -404,11 +419,11 @@ function drawLose(){
   var c=new PIXI.Container();c.zIndex=0;stage.addChild(c);
   c.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x000000,0.7);g.drawRect(0,0,SW,SH);g.endFill();return g})());
   var i=0;function sh(){if(i>=6){c.x=0;return}c.x=i%2===0?8:-8;i++;setTimeout(sh,60)}sh();
-  c.addChild((function(){var t=new PIXI.Text('😢 Shelf Full!',{fontSize:Math.min(SW*0.1,42),fill:0xE74C3C,fontWeight:'bold'});t.anchor.set(0.5);t.x=SW/2;t.y=SH*0.28;return t})());
+  c.addChild((function(){var t=new PIXI.Text('😢 Полка полна!',{fontSize:Math.min(SW*0.1,42),fill:0xE74C3C,fontWeight:'bold'});t.anchor.set(0.5);t.x=SW/2;t.y=SH*0.28;return t})());
   var bw=SW*0.5;var bh=SW*0.1;
-  c.addChild(makeButton('🔄 Retry',0xE67E22,bw,bh,function(){startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.45;
-  c.addChild(makeButton('↩ Use Undo',0x8E44AD,bw,bh,function(){boosterCounts.undo=Math.max(boosterCounts.undo,1);boosterUndo();if(shelfItems.filter(function(s){return s!==null}).length<maxShelf)startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55;
-  c.addChild(makeButton('🏠 Menu',0x2980B9,bw,bh,function(){drawMenu()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.65;
+  c.addChild(makeButton('🔄 Заново',0xE67E22,bw,bh,function(){startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.45;
+  c.addChild(makeButton('↩ Отменить ход',0x8E44AD,bw,bh,function(){boosterCounts.undo=Math.max(boosterCounts.undo,1);boosterUndo();if(shelfItems.filter(function(s){return s!==null}).length<maxShelf)startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55;
+  c.addChild(makeButton('🏠 Меню',0x2980B9,bw,bh,function(){drawMenu()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.65;
 }
 
 drawMenu();
