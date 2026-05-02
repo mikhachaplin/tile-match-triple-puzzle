@@ -225,33 +225,44 @@ function onTileClick(tile){
   animateScale(sp,1,0.85,80,function(){
     animateScale(sp,0.85,1.1,100,function(){
       var fly=makeTileSprite(tile.type,false,SLOT_W,SLOT_H);
-      fly.x=fromX+(TW-SLOT_W)/2;fly.y=fromY;
+      // Start: center of the tile on field
+      var fieldCX=fromX+TW/2;
+      var fieldCY=fromY+TH/2;
+      fly.x=fieldCX-SLOT_W/2;
+      fly.y=fieldCY-SLOT_H/2;
+      fly.scale.set(TW/SLOT_W,TH/SLOT_H); // start at field tile size
       flyLayer.addChild(fly);
       sp.visible=false;
 
       var shelfStartX=(SW-maxShelf*(SLOT_W+3))/2;
       var targetX=shelfStartX+slotIdx*(SLOT_W+3);
       var targetY=SH-SHELF_H+(SHELF_H-SLOT_H)/2;
+      // Target center
+      var targetCX=targetX+SLOT_W/2;
+      var targetCY=targetY+SLOT_H/2;
 
-      // Animate move + shrink
+      // Animate: move center → center, shrink scale to 1
       var dur=300;var s=performance.now();
-      var sx0=1,sy0=1;var sx1=SLOT_W/TW,sy1=SLOT_H/TH;
+      var sx0=TW/SLOT_W,sy0=TH/SLOT_H;var sx1=1,sy1=1;
 
       function flyTick(){
         var t=Math.min((performance.now()-s)/dur,1);
         var e=easeOutCubic(t);
+        // Scale interpolation
         var csx=sx0+(sx1-sx0)*e;
         var csy=sy0+(sy1-sy0)*e;
         fly.scale.set(csx,csy);
-        var cx=fromX+(TW/2)+(targetX+SLOT_W/2-fromX-TW/2)*e;
-        var cy=fromY+TH/2+(targetY+SLOT_H/2-fromY-TH/2)*e;
+        // Center position interpolation: from center of field tile to center of shelf slot
+        var cx=fieldCX+(targetCX-fieldCX)*e;
+        var cy=fieldCY+(targetCY-fieldCY)*e;
+        // Position sprite so its center is at (cx, cy)
         fly.x=cx-(SLOT_W*csx)/2;
         fly.y=cy-(SLOT_H*csy)/2;
         if(t<1)requestAnimationFrame(flyTick);
         else{
           shelfItems[slotIdx]=fly;
           fly.x=targetX;fly.y=targetY;
-          fly.scale.set(sx1,sy1);
+          fly.scale.set(1,1); // final size = slot size
           shelfContainer.addChild(fly);
           flyLayer.removeChild(fly);
           animating=false;
