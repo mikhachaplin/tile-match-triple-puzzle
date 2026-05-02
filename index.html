@@ -159,8 +159,8 @@ function animateTripleMatch(sprites,cb){
 }
 
 // ===== CONFETTI =====
-function spawnConfetti(){confettiParticles.forEach(function(p){p.parent&&p.parent.removeChild(p)});confettiParticles=[];var cls=[0xE74C3C,0x3498DB,0x2ECC71,0xF1C40F,0x9B59B6,0xE91E63,0xFF9800];for(var i=0;i<40;i++){var g=new PIXI.Graphics();g.beginFill(cls[Math.floor(Math.random()*cls.length)]);g.drawRoundedRect(0,0,8,8,2);g.endFill();g.x=SW*Math.random();g.y=-20-Math.random()*100;g._vx=(Math.random()-0.5)*4;g._vy=Math.random()*3+2;g._rot=Math.random()*0.2-0.1;stage.addChild(g);confettiParticles.push(g)}}
-app.ticker.add(function(){if(screenState==='win')confettiParticles.forEach(function(p){p.x+=p._vx;p.y+=p._vy;p._vy+=0.1;p.rotation+=p._rot;if(p.y>SH+20)p._vy=-Math.abs(p._vy)*0.3})});
+function spawnConfetti(){confettiParticles.forEach(function(p){p.parent&&p.parent.removeChild(p)});confettiParticles=[];var cls=[0xE74C3C,0x3498DB,0x2ECC71,0xF1C40F,0x9B59B6,0xE91E63,0xFF9800,0x00BCD4,0x8BC34A,0xFFC107];for(var i=0;i<150;i++){var g=new PIXI.Graphics();var c=cls[Math.floor(Math.random()*cls.length)];g.beginFill(c);var sz=4+Math.random()*8;var shape=Math.random();if(shape<0.3){g.drawRoundedRect(0,0,sz,sz,2)}else if(shape<0.6){g.drawCircle(0,0,sz/2)}else{g.drawStar(0,0,5,sz/2,sz/4)}g.endFill();g.x=SW*Math.random();g.y=-20-Math.random()*200;g._vx=(Math.random()-0.5)*6;g._vy=Math.random()*4+1;g._rot=(Math.random()-0.5)*0.3;g._alpha=1;stage.addChild(g);confettiParticles.push(g)}}
+app.ticker.add(function(){if(screenState==='win')confettiParticles.forEach(function(p){p.x+=p._vx;p.y+=p._vy;p._vy+=0.1;p.rotation+=p._rot;p._alpha-=0.002;p.alpha=Math.max(0,p._alpha);if(p.y>SH+20)p._vy=-Math.abs(p._vy)*0.3})});
 
 // ===== GAME LOGIC =====
 function generateTiles(){
