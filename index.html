@@ -119,10 +119,6 @@ function makeTileSprite(type,blocked,w,h,forShelf){
   g.beginFill(TILE_BG);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
   // Brown border
   g.lineStyle(2,TILE_BORDER,0.7);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
-  // Colored top strip (type indicator)
-  g.beginFill(color,0.85);g.drawRoundedRect(0,0,w,h*0.28,rad);g.endFill();
-  // Cover bottom corners of strip
-  g.beginFill(TILE_BG);g.drawRect(0,h*0.18,w,h*0.12);g.endFill();
   // Shine
   g.beginFill(0xFFFFFF,0.12);g.drawRoundedRect(3,3,w-6,h*0.2,rad*0.6);g.endFill();
   c.addChild(g);
