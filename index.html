@@ -57,9 +57,13 @@ var fieldContainer,shelfContainer,flyLayer,topBar;
 var animating=false;
 var confettiParticles=[];
 
+// Tile colors — beige/sand background, brown border
+var TILE_BG=0xF5E6C8;   // beige/sand
+var TILE_BORDER=0x8B6914; // brown
+var TILE_SHADOW=0x000000;
+
 var SW,SH,TW,TH,SLOT_W,SLOT_H;
 var TOP_H,BBAR_H,FIELD_H,SHELF_H;
-// Field layout — calculated ONCE at level start, never changes during play
 var fieldLayout={offX:0,offY:0,gapX:0,gapY:0,cols:0};
 
 app=new PIXI.Application({width:window.innerWidth,height:window.innerHeight,backgroundColor:0x000000,resolution:window.devicePixelRatio||1,autoDensity:true});
@@ -74,18 +78,14 @@ function calcSizes(){
   BBAR_H=Math.max(SH*0.06,36);
   SHELF_H=Math.max(SH*0.14,58);
   FIELD_H=SH-TOP_H-BBAR_H-SHELF_H;
-  
   var cols=Math.min(5,levelConfig.types);
   var totalTiles=levelConfig.types*levelConfig.perType;
   var rows=Math.ceil(totalTiles/cols/levelConfig.layers)+levelConfig.layers;
-  
   var gapRatioX=0.4;var gapRatioY=0.3;
   var maxTileW=(SW-20)/(cols*(1+gapRatioX));
   var maxTileH=(FIELD_H-20)/(rows*(1+gapRatioY));
-  var tileBase=Math.min(maxTileW,maxTileH);
-  TW=tileBase;
+  TW=tileBase=Math.min(maxTileW,maxTileH);
   TH=TW*1.4;
-  
   SLOT_W=(SW-20)/8-3;
   SLOT_H=SLOT_W*1.4;
   if(SLOT_H>SHELF_H-8){SLOT_H=SHELF_H-8;SLOT_W=SLOT_H/1.4}
@@ -108,15 +108,25 @@ function exportJSON(){var b=new Blob([JSON.stringify(levelConfig,null,2)],{type:
 function importJSON(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(ev){levelConfig=JSON.parse(ev.target.result);applyEditor()};r.readAsText(f)}
 
 // ===== SPRITE HELPERS =====
-function makeTileSprite(type,blocked,w,h){
+function makeTileSprite(type,blocked,w,h,forShelf){
   var c=new PIXI.Container();
   var g=new PIXI.Graphics();
   var color=PIXI.utils.string2hex(COLORS[type]);
-  g.beginFill(0x000000,0.2);g.drawRoundedRect(2,2,w,h,w*0.1);g.endFill();
-  g.beginFill(color);g.drawRoundedRect(0,0,w,h,w*0.1);g.endFill();
-  g.beginFill(0xFFFFFF,0.18);g.drawRoundedRect(3,3,w-6,h*0.25,w*0.08);g.endFill();
+  var rad=w*0.1;
+  // Shadow
+  g.beginFill(TILE_SHADOW,0.15);g.drawRoundedRect(2,2,w,h,rad);g.endFill();
+  // Beige/sand background
+  g.beginFill(TILE_BG);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
+  // Brown border
+  g.lineStyle(2,TILE_BORDER,0.7);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
+  // Colored top strip (type indicator)
+  g.beginFill(color,0.85);g.drawRoundedRect(0,0,w,h*0.28,rad);g.endFill();
+  // Cover bottom corners of strip
+  g.beginFill(TILE_BG);g.drawRect(0,h*0.18,w,h*0.12);g.endFill();
+  // Shine
+  g.beginFill(0xFFFFFF,0.12);g.drawRoundedRect(3,3,w-6,h*0.2,rad*0.6);g.endFill();
   c.addChild(g);
-  var t=new PIXI.Text(EMOJIS[type],{fontSize:Math.min(w,h)*0.4});t.anchor.set(0.5);t.x=w/2;t.y=h/2;c.addChild(t);
+  var t=new PIXI.Text(EMOJIS[type],{fontSize:Math.min(w,h)*0.35});t.anchor.set(0.5);t.x=w/2;t.y=h*0.6;c.addChild(t);
   c.alpha=blocked?0.5:1;c._tileType=type;c._blocked=blocked;c._w=w;c._h=h;
   return c;
 }
@@ -165,8 +175,10 @@ function generateTiles(){
   var idx=0;
   for(var layer=0;layer<levelConfig.layers;layer++){
     var count=Math.ceil(total/levelConfig.layers);
+    // Odd layers (1,3,5...) have +1 column because of half-cell offset
+    var layerCols=(layer%2===1)?cols+1:cols;
     for(var i=0;i<count&&idx<total;i++){
-      var r=Math.floor(i/cols);var c=i%cols;
+      var r=Math.floor(i/layerCols);var c=i%layerCols;
       tiles.push({type:types[idx],layer:layer,col:c,row:r,removed:false,sprite:null});
       idx++;
     }
@@ -177,25 +189,45 @@ function generateTiles(){
 function calcFieldLayout(){
   var cols=Math.min(Math.floor((SW-20)/(TW*1.4)),5);
   if(cols<1)cols=1;
+  fieldLayout.cols=cols;
+  // Max columns across all layers (odd layers have cols+1)
+  var maxCols=cols+1;
   var totalTiles=levelConfig.types*levelConfig.perType;
   var rowsPerLayer=Math.ceil(totalTiles/cols/levelConfig.layers);
-  var totalRows=rowsPerLayer+levelConfig.layers-1;
-  
+  var layerH=TH*0.12; // vertical offset per layer (stacking height)
+  var totalRows=rowsPerLayer;
   var gapX=TW*0.4;var gapY=TH*0.3;
-  var contentW=cols*TW+(cols-1)*gapX;
-  var contentH=totalRows*TH+(totalRows-1)*gapY;
+  var contentW=maxCols*TW+(maxCols-1)*gapX;
+  var contentH=totalRows*TH+(totalRows-1)*gapY+(levelConfig.layers-1)*layerH;
   var ft=TOP_H+BBAR_H;
   var offX=(SW-contentW)/2;
   var offY=ft+(FIELD_H-contentH)/2;
-  
-  fieldLayout={offX:offX,offY:offY,gapX:gapX,gapY:gapY,cols:cols};
+  fieldLayout.offX=offX;fieldLayout.offY=offY;fieldLayout.gapX=gapX;fieldLayout.gapY=gapY;
+  fieldLayout.layerH=layerH;
+  fieldLayout.halfCell=(TW+gapX)/2; // half-cell offset for brick layers
 }
 
+// Get pixel position of a tile
+function getTilePos(tile){
+  var L=fieldLayout;
+  var halfOffset=(tile.layer%2===1)?L.halfCell:0;
+  var x=L.offX+halfOffset+tile.col*(TW+L.gapX);
+  var y=L.offY+tile.row*(TH+L.gapY)-tile.layer*L.layerH;
+  return{x:x,y:y};
+}
+
+// A tile is blocked if any tile in a HIGHER layer overlaps it visually
 function isBlocked(tile){
   for(var i=0;i<tiles.length;i++){
     var t=tiles[i];
     if(t===tile||t.removed||t.layer<=tile.layer)continue;
-    if(t.col===tile.col&&t.row===tile.row)return true;
+    // Get positions
+    var tp=getTilePos(t);
+    var myp=getTilePos(tile);
+    // Check visual overlap (bounding box intersection)
+    if(tp.x<myp.x+TW && tp.x+TW>myp.x && tp.y<myp.y+TH && tp.y+TH>myp.y){
+      return true;
+    }
   }
   return false;
 }
@@ -224,8 +256,7 @@ function onTileClick(tile){
 
   animateScale(sp,1,0.85,80,function(){
     animateScale(sp,0.85,1.1,100,function(){
-      var fly=makeTileSprite(tile.type,false,SLOT_W,SLOT_H);
-      // Start: center of field tile
+      var fly=makeTileSprite(tile.type,false,SLOT_W,SLOT_H,true);
       var fieldCX=fromX+TW/2;
       var fieldCY=fromY+TH/2;
       fly.x=fieldCX-SLOT_W/2;
@@ -261,7 +292,6 @@ function onTileClick(tile){
           shelfContainer.addChild(fly);
           flyLayer.removeChild(fly);
           animating=false;
-          // Update blocked states WITHOUT rebuilding layout
           updateBlockedStates();
           checkTriple();
           setTimeout(function(){checkLose()},350);
@@ -272,11 +302,8 @@ function onTileClick(tile){
   });
 }
 
-// Update blocked states WITHOUT changing layout positions
 function updateBlockedStates(){
   if(!fieldContainer)return;
-  var layerOX=3;var layerOY=-5;
-  // Multiple passes until stable
   var changed=true;var passes=0;
   while(changed&&passes<10){
     changed=false;passes++;
@@ -292,7 +319,6 @@ function updateBlockedStates(){
         }else{
           tile.sprite.eventMode='static';
           tile.sprite.cursor='pointer';
-          // Re-attach click handler if needed
           if(!tile.sprite._hasClick){
             tile.sprite._hasClick=true;
             (function(t){
@@ -310,21 +336,21 @@ function updateBlockedStates(){
 function buildFieldTiles(){
   if(!fieldContainer)return;
   fieldContainer.removeChildren();
-  
   var ft=TOP_H+BBAR_H;
   var fbg=new PIXI.Graphics();fbg.beginFill(0xF5F0E8);fbg.drawRect(0,0,SW,FIELD_H);fbg.endFill();
   fbg.y=ft;fieldContainer.addChild(fbg);
 
-  var L=fieldLayout;
-  var layerOX=3;var layerOY=-5;
+  // Sort tiles by layer (draw lower layers first) then by row
+  var sorted=tiles.filter(function(t){return!t.removed}).slice().sort(function(a,b){
+    if(a.layer!==b.layer)return a.layer-b.layer;
+    return a.row-b.row;
+  });
 
-  tiles.forEach(function(tile){
-    if(tile.removed)return;
+  sorted.forEach(function(tile){
     var blocked=isBlocked(tile);
-    var sp=makeTileSprite(tile.type,blocked,TW,TH);
-    sp.x=L.offX+tile.col*(TW+L.gapX)+tile.layer*layerOX;
-    sp.y=L.offY+tile.row*(TH+L.gapY)+tile.layer*layerOY;
-    
+    var sp=makeTileSprite(tile.type,blocked,TW,TH,false);
+    var pos=getTilePos(tile);
+    sp.x=pos.x;sp.y=pos.y;
     if(!blocked){
       sp.eventMode='static';
       sp.cursor='pointer';
@@ -333,7 +359,6 @@ function buildFieldTiles(){
         sp.on('pointertap',function(){onTileClick(t)});
       })(tile);
     }
-    
     tile.sprite=sp;
     fieldContainer.addChild(sp);
   });
@@ -357,9 +382,9 @@ function startGame(){
   clearAll();screenState='play';score=0;maxShelf=7;undoStack=[];shelfItems=[];
   for(var i=0;i<8;i++)shelfItems.push(null);
   boosterCounts={undo:levelConfig.boosters,shuffle:levelConfig.boosters,extraSlot:levelConfig.boosters,hint:levelConfig.boosters};
-  calcSizes();      // Calculate tile/shelf sizes
-  calcFieldLayout(); // Calculate field layout ONCE
-  generateTiles();   // Generate tile data
+  calcSizes();
+  calcFieldLayout();
+  generateTiles();
   rebuildPlayScreen();
 }
 
@@ -371,24 +396,20 @@ function rebuildPlayScreen(){
   topBar=new PIXI.Container();topBar.zIndex=5;
   stage.addChild(fieldContainer);stage.addChild(shelfContainer);stage.addChild(flyLayer);stage.addChild(topBar);
 
-  // TOP BAR
   topBar.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x1A1A2E,0.92);g.drawRect(0,0,SW,TOP_H);g.endFill();return g})());
   var st=new PIXI.Text('⭐ '+score,{fontSize:Math.min(SW*0.04,16),fill:0xF1C40F,fontWeight:'bold'});st.x=SW/2;st.y=TOP_H/2;st.anchor.set(0.5);st._isScore=true;topBar.addChild(st);
   var btnH=TOP_H*0.7;
   topBar.addChild(makeButton('⏸',0x7F8C8D,btnH,btnH,function(){drawMenu()}));topBar.children[topBar.children.length-1].x=SW-btnH-6;topBar.children[topBar.children.length-1].y=(TOP_H-btnH)/2;
   topBar.addChild(makeButton('🔧',0x555,btnH,btnH,function(){toggleEditor()}));topBar.children[topBar.children.length-1].x=6;topBar.children[topBar.children.length-1].y=(TOP_H-btnH)/2;
 
-  // Booster bar
   topBar.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x16213E,0.85);g.drawRect(0,TOP_H,SW,BBAR_H);g.endFill();return g})());
   var bbw=Math.min(SW*0.22,80);var bbh=BBAR_H-8;var startX=(SW-4*bbw-3*4)/2;
   [{text:'↩'+boosterCounts.undo,color:0x8E44AD,fn:boosterUndo},{text:'🔀'+boosterCounts.shuffle,color:0x2980B9,fn:boosterShuffle},{text:'+1('+boosterCounts.extraSlot+')',color:0x27AE60,fn:boosterExtraSlot},{text:'💡'+boosterCounts.hint,color:0xE67E22,fn:boosterHint}].forEach(function(b,i){
     var btn=makeButton(b.text,b.color,bbw,bbh,b.fn);btn.x=startX+i*(bbw+4);btn.y=TOP_H+4;topBar.addChild(btn);
   });
 
-  // FIELD — uses saved layout, NO recalculation
   buildFieldTiles();
 
-  // SHELF
   shelfContainer.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x8B6F47);g.drawRect(0,SH-SHELF_H,SW,SHELF_H);g.endFill();return g})());
   var shelfStartX=(SW-maxShelf*(SLOT_W+3))/2;
   for(var i=0;i<maxShelf;i++){var sl=makeSlotSprite();sl.x=shelfStartX+i*(SLOT_W+3);sl.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2;shelfContainer.addChild(sl)}
