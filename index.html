@@ -122,7 +122,7 @@ function makeTileSprite(type,blocked,w,h,forShelf){
   // Shine
   g.beginFill(0xFFFFFF,0.12);g.drawRoundedRect(3,3,w-6,h*0.2,rad*0.6);g.endFill();
   c.addChild(g);
-  var t=new PIXI.Text(EMOJIS[type],{fontSize:Math.min(w,h)*0.35});t.anchor.set(0.5);t.x=w/2;t.y=h*0.6;c.addChild(t);
+  var t=new PIXI.Text(EMOJIS[type],{fontSize:Math.min(w,h)*0.55});t.anchor.set(0.5);t.x=w/2;t.y=h/2;c.addChild(t);
   c.alpha=blocked?0.5:1;c._tileType=type;c._blocked=blocked;c._w=w;c._h=h;
   return c;
 }
