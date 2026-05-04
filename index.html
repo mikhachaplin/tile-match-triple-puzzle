@@ -109,13 +109,16 @@ function makeTileSprite(type,blocked,w,h,forShelf){
   var rad=w*0.1;
   // Shadow
   g.beginFill(TILE_SHADOW,0.15);g.drawRoundedRect(2,2,w,h,rad);g.endFill();
-  // Beige/sand background
-  g.beginFill(TILE_BG);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
-  // Brown border
-  g.lineStyle(2,TILE_BORDER,0.7);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
+  // Background: darker if blocked (under another tile)
+  var bg=blocked?0xD4C4A0:TILE_BG; // darker beige for blocked
+  g.beginFill(bg);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
+  // Border: darker brown if blocked
+  var brd=blocked?0x5C4610:TILE_BORDER;
+  g.lineStyle(2,brd,0.7);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
   c.addChild(g);
   var t=new PIXI.Text(EMOJIS[type],{fontSize:Math.min(w,h)*0.55});t.anchor.set(0.5);t.x=w/2;t.y=h/2;c.addChild(t);
-  c.alpha=blocked?0.5:1;c._tileType=type;c._blocked=blocked;c._w=w;c._h=h;
+  c.alpha=1;c._tileType=type;c._blocked=blocked;c._w=w;c._h=h;
+  c._darkened=blocked;
   return c;
 }
 function makeSlotSprite(){
@@ -366,7 +369,17 @@ function updateBlockedStates(){
       var blocked=isBlocked(tile);
       if(tile.sprite._blocked!==blocked){
         tile.sprite._blocked=blocked;
-        tile.sprite.alpha=blocked?0.5:1;
+        tile.sprite._darkened=blocked;
+        // Redraw the tile with correct darkness
+        var sp=tile.sprite;
+        var g=sp.getChildAt(0); // graphics child
+        g.clear();
+        var rad=TW*0.1;
+        var bg=blocked?0xD4C4A0:TILE_BG;
+        var brd=blocked?0x5C4610:TILE_BORDER;
+        g.beginFill(TILE_SHADOW,0.15);g.drawRoundedRect(2,2,TW,TH,rad);g.endFill();
+        g.beginFill(bg);g.drawRoundedRect(0,0,TW,TH,rad);g.endFill();
+        g.lineStyle(2,brd,0.7);g.drawRoundedRect(0,0,TW,TH,rad);g.endFill();
         if(blocked){
           tile.sprite.eventMode='none';
           tile.sprite.cursor='default';
