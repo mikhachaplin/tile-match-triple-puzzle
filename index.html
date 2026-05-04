@@ -165,14 +165,16 @@ function generateTiles(){
   var total=levelConfig.types*levelConfig.perType;
   var types=[];for(var t=0;t<levelConfig.types;t++)for(var j=0;j<levelConfig.perType;j++)types.push(t);
   for(var i=types.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var tmp=types[i];types[i]=types[j];types[j]=tmp}
-  var cols=fieldLayout.cols;
+  var baseCols=fieldLayout.cols;
+  var baseRows=fieldLayout.rows;
   var idx=0;
   for(var layer=0;layer<levelConfig.layers;layer++){
-    var count=Math.ceil(total/levelConfig.layers);
-    // Odd layers: same number of columns, but offset by half-cell
-    // This keeps them within the bounds of the even layer below
-    var layerCols=cols;
-    for(var i=0;i<count&&idx<total;i++){
+    // Each layer shrinks by 1 col and 1 row = pyramid
+    var layerCols=Math.max(1,baseCols-layer);
+    var layerRows=Math.max(1,baseRows-layer);
+    // Odd layers offset by half-cell (brick pattern)
+    var layerCount=layerCols*layerRows;
+    for(var i=0;i<layerCount&&idx<total;i++){
       var r=Math.floor(i/layerCols);var c=i%layerCols;
       tiles.push({type:types[idx],layer:layer,col:c,row:r,removed:false,sprite:null});
       idx++;
@@ -184,37 +186,60 @@ function generateTiles(){
 function calcFieldLayout(){
   var cols=Math.min(Math.floor((SW-20)/(TW*1.4)),5);
   if(cols<1)cols=1;
-  fieldLayout.cols=cols;
-  // Content width = same for all layers (odd layers offset but same width)
   var totalTiles=levelConfig.types*levelConfig.perType;
-  var rowsPerLayer=Math.ceil(totalTiles/cols/levelConfig.layers);
-  var layerH=TH*0.12; // vertical offset per layer (stacking height)
-  var totalRows=rowsPerLayer;
+  // Base layer rows: fit all tiles across layers as pyramid
+  // Layer 0: cols*rows, Layer 1: (cols-1)*(rows-1), etc.
+  // Approximate: total ≈ rows * (cols + (cols-1) + ... ) / layers
+  // Simple: enough rows so all tiles fit
+  var rows=2;
+  while(true){
+    var capacity=0;
+    for(var l=0;l<levelConfig.layers;l++){
+      var lc=Math.max(1,cols-l);
+      var lr=Math.max(1,rows-l);
+      capacity+=lc*lr;
+    }
+    if(capacity>=totalTiles)break;
+    rows++;
+    if(rows>20)break; // safety
+  }
+  
+  fieldLayout.cols=cols;
+  fieldLayout.rows=rows;
+  var layerH=TH*0.12;
   var gapX=TW*0.4;var gapY=TH*0.3;
+  // Content size = base layer (biggest)
   var contentW=cols*TW+(cols-1)*gapX;
-  var contentH=totalRows*TH+(totalRows-1)*gapY+(levelConfig.layers-1)*layerH;
+  var contentH=rows*TH+(rows-1)*gapY+(levelConfig.layers-1)*layerH;
   var ft=TOP_H+BBAR_H;
   var offX=(SW-contentW)/2;
   var offY=ft+(FIELD_H-contentH)/2;
-  // Ensure field fits
-  if(offY<ft){offY=ft}
-  if(offY+contentH>ft+FIELD_H){offY=Math.max(ft,ft+FIELD_H-contentH)}
+  if(offY<ft)offY=ft;
   fieldLayout.offX=offX;fieldLayout.offY=offY;fieldLayout.gapX=gapX;fieldLayout.gapY=gapY;
   fieldLayout.layerH=layerH;
-  fieldLayout.halfCell=(TW+gapX)/2; // half-cell offset for brick layers
+  fieldLayout.halfCell=(TW+gapX)/2;
 }
 
 // Get pixel position of a tile
 function getTilePos(tile){
   var L=fieldLayout;
-  // Odd layers shifted right by half-cell, but last tile clipped to stay within bounds
+  var baseCols=L.cols;
+  var baseRows=L.rows;
+  var layerCols=Math.max(1,baseCols-tile.layer);
+  var layerRows=Math.max(1,baseRows-tile.layer);
+  // Half-cell offset for odd layers (brick pattern)
   var halfOffset=(tile.layer%2===1)?L.halfCell:0;
-  var x=L.offX+halfOffset+tile.col*(TW+L.gapX);
-  var y=L.offY+tile.row*(TH+L.gapY)-tile.layer*L.layerH;
-  // Clamp: ensure tile doesn't go beyond right edge of the base layer
-  var maxX=L.offX+(L.cols-1)*(TW+L.gapX)+TW; // right edge of even layer
-  if(x+TW>maxX)x=maxX-TW;
-  if(x<L.offX)x=L.offX;
+  // Center this layer within the base layer horizontally
+  var layerW=layerCols*TW+(layerCols-1)*L.gapX;
+  var baseW=baseCols*TW+(baseCols-1)*L.gapX;
+  var layerOffX=L.offX+(baseW-layerW)/2+halfOffset;
+  // Center vertically within base rows, then shift up per layer
+  var layerH=layerRows*TH+(layerRows-1)*L.gapY;
+  var baseH_content=baseRows*TH+(baseRows-1)*L.gapY;
+  var layerOffY=L.offY+(baseH_content-layerH)/2-tile.layer*L.layerH;
+  
+  var x=layerOffX+tile.col*(TW+L.gapX);
+  var y=layerOffY+tile.row*(TH+L.gapY);
   return{x:x,y:y};
 }
 
