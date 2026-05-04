@@ -215,8 +215,10 @@ function calcFieldLayout(){
   // Now calculate tile size to fit the base layer in the field area
   // Base layer needs: bestCols tiles across, bestRows tiles down
   // With gaps
-  var maxTW=(SW-20)/(bestCols*(1+gapRatioX));
-  var maxTH=(FIELD_H-20)/(bestRows*(1+gapRatioY));
+ var totalFactorX=bestCols+(layers-1)*0.5;
+ var totalFactorY=bestRows+(layers-1)*0.5;
+ var maxTW=(SW-20)/(totalFactorX*(1+gapRatioX));
+ var maxTH=(FIELD_H-20)/(totalFactorY*(1+gapRatioY));
   TW=Math.min(maxTW,maxTH);
   TH=TW*1.4;
   
@@ -231,14 +233,16 @@ function calcFieldLayout(){
   var halfCellY=(TH+gapY)/2;
   
   // Base layer dimensions
-  var baseW=bestCols*TW+(bestCols-1)*gapX;
-  var baseH=bestRows*TH+(bestRows-1)*gapY;
-  // Total height including all pyramid layers stacked
-  var totalH=baseH;
-  
-  var offX=(SW-baseW)/2;
-  var offY=ft+(FIELD_H-totalH)/2;
-  if(offY<ft)offY=ft;
+ var baseW=bestCols*TW+(bestCols-1)*gapX;
+ var baseH=bestRows*TH+(bestRows-1)*gapY;
+ // Total bounding box: base + halfCell offsets from higher layers
+ var totalW=baseW+(layers-1)*halfCellX;
+ var totalH=baseH+(layers-1)*halfCellY;
+
+ var offX=(SW-totalW)/2;
+ var offY=ft+(FIELD_H-totalH)/2;
+ if(offY<ft)offY=ft;
+ if(offX<0)offX=0;
   
   fieldLayout.cols=bestCols;
   fieldLayout.rows=bestRows;
