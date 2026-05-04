@@ -78,14 +78,8 @@ function calcSizes(){
   BBAR_H=Math.max(SH*0.06,36);
   SHELF_H=Math.max(SH*0.14,58);
   FIELD_H=SH-TOP_H-BBAR_H-SHELF_H;
-  var cols=Math.min(5,levelConfig.types);
-  var totalTiles=levelConfig.types*levelConfig.perType;
-  var rows=Math.ceil(totalTiles/cols/levelConfig.layers)+levelConfig.layers;
-  var gapRatioX=0.4;var gapRatioY=0.3;
-  var maxTileW=(SW-20)/(cols*(1+gapRatioX));
-  var maxTileH=(FIELD_H-20)/(rows*(1+gapRatioY));
-  TW=tileBase=Math.min(maxTileW,maxTileH);
-  TH=TW*1.4;
+  // Tile sizes will be calculated in calcFieldLayout based on pyramid fit
+  TW=50;TH=70; // initial, will be recalculated
   SLOT_W=(SW-20)/8-3;
   SLOT_H=SLOT_W*1.4;
   if(SLOT_H>SHELF_H-8){SLOT_H=SHELF_H-8;SLOT_W=SLOT_H/1.4}
@@ -169,10 +163,9 @@ function generateTiles(){
   var baseRows=fieldLayout.rows;
   var idx=0;
   for(var layer=0;layer<levelConfig.layers;layer++){
-    // Each layer shrinks by 1 col and 1 row = pyramid
+    // Each layer: (baseCols-layer) columns, (baseRows-layer) rows
     var layerCols=Math.max(1,baseCols-layer);
     var layerRows=Math.max(1,baseRows-layer);
-    // Odd layers offset by half-cell (brick pattern)
     var layerCount=layerCols*layerRows;
     for(var i=0;i<layerCount&&idx<total;i++){
       var r=Math.floor(i/layerCols);var c=i%layerCols;
@@ -183,60 +176,89 @@ function generateTiles(){
 }
 
 // Calculate field layout ONCE at level start
+// Pyramid: layer 0 = baseCols×baseRows, layer 1 = (baseCols-1)×(baseRows-1), etc.
+// Each layer is offset by half a cell in X and half a cell in Y (brick pattern)
 function calcFieldLayout(){
-  var cols=Math.min(Math.floor((SW-20)/(TW*1.4)),5);
-  if(cols<1)cols=1;
   var totalTiles=levelConfig.types*levelConfig.perType;
-  // Base layer rows: fit all tiles across layers as pyramid
-  // Layer 0: cols*rows, Layer 1: (cols-1)*(rows-1), etc.
-  // Approximate: total ≈ rows * (cols + (cols-1) + ... ) / layers
-  // Simple: enough rows so all tiles fit
-  var rows=2;
-  while(true){
-    var capacity=0;
-    for(var l=0;l<levelConfig.layers;l++){
-      var lc=Math.max(1,cols-l);
-      var lr=Math.max(1,rows-l);
-      capacity+=lc*lr;
+  var layers=levelConfig.layers;
+  var gapRatioX=0.4;var gapRatioY=0.3;
+  var ft=TOP_H+BBAR_H;
+  
+  // Find smallest baseCols×baseRows that fits all tiles as pyramid
+  var bestCols=3,bestRows=3;
+  for(var tryCols=3;tryCols<=10;tryCols++){
+    for(var tryRows=3;tryRows<=10;tryRows++){
+      var cap=0;
+      for(var l=0;l<layers;l++){
+        var lc=Math.max(1,tryCols-l);
+        var lr=Math.max(1,tryRows-l);
+        cap+=lc*lr;
+      }
+      if(cap>=totalTiles){
+        // Check if these cols/rows fit on screen with some tile size
+        // We'll verify after calculating tile size
+        bestCols=tryCols;bestRows=tryRows;
+        // Try to find minimal rows for this cols
+        break;
+      }
     }
-    if(capacity>=totalTiles)break;
-    rows++;
-    if(rows>20)break; // safety
+    // Check if minimal rows for this cols already works
+    var cap=0;
+    for(var l=0;l<layers;l++){
+      var lc=Math.max(1,bestCols-l);
+      var lr=Math.max(1,bestRows-l);
+      cap+=lc*lr;
+    }
+    if(cap>=totalTiles)break;
   }
   
-  fieldLayout.cols=cols;
-  fieldLayout.rows=rows;
-  var layerH=TH*0.12;
-  var gapX=TW*0.4;var gapY=TH*0.3;
-  // Content size = base layer (biggest)
-  var contentW=cols*TW+(cols-1)*gapX;
-  var contentH=rows*TH+(rows-1)*gapY+(levelConfig.layers-1)*layerH;
-  var ft=TOP_H+BBAR_H;
-  var offX=(SW-contentW)/2;
-  var offY=ft+(FIELD_H-contentH)/2;
+  // Now calculate tile size to fit the base layer in the field area
+  // Base layer needs: bestCols tiles across, bestRows tiles down
+  // With gaps
+  var maxTW=(SW-20)/(bestCols*(1+gapRatioX));
+  var maxTH=(FIELD_H-20)/(bestRows*(1+gapRatioY));
+  TW=Math.min(maxTW,maxTH);
+  TH=TW*1.4;
+  
+  // Recalculate slot sizes
+  SLOT_W=(SW-20)/8-3;
+  SLOT_H=SLOT_W*1.4;
+  if(SLOT_H>SHELF_H-8){SLOT_H=SHELF_H-8;SLOT_W=SLOT_H/1.4}
+  
+  var gapX=TW*gapRatioX;
+  var gapY=TH*gapRatioY;
+  var halfCellX=(TW+gapX)/2;
+  var halfCellY=(TH+gapY)/2;
+  
+  // Base layer dimensions
+  var baseW=bestCols*TW+(bestCols-1)*gapX;
+  var baseH=bestRows*TH+(bestRows-1)*gapY;
+  // Total height including all pyramid layers stacked
+  var totalH=baseH;
+  
+  var offX=(SW-baseW)/2;
+  var offY=ft+(FIELD_H-totalH)/2;
   if(offY<ft)offY=ft;
-  fieldLayout.offX=offX;fieldLayout.offY=offY;fieldLayout.gapX=gapX;fieldLayout.gapY=gapY;
-  fieldLayout.layerH=layerH;
-  fieldLayout.halfCell=(TW+gapX)/2;
+  
+  fieldLayout.cols=bestCols;
+  fieldLayout.rows=bestRows;
+  fieldLayout.offX=offX;fieldLayout.offY=offY;
+  fieldLayout.gapX=gapX;fieldLayout.gapY=gapY;
+  fieldLayout.halfCellX=halfCellX;
+  fieldLayout.halfCellY=halfCellY;
 }
 
 // Get pixel position of a tile
+// Layer 0: starts at offX, offY
+// Layer 1: shifted right by halfCellX, down by halfCellY (from base start)
+// Layer 2: shifted by 2*halfCellX, 2*halfCellY, etc.
+// This creates a pyramid where each layer is offset and smaller
 function getTilePos(tile){
   var L=fieldLayout;
-  var baseCols=L.cols;
-  var baseRows=L.rows;
-  var layerCols=Math.max(1,baseCols-tile.layer);
-  var layerRows=Math.max(1,baseRows-tile.layer);
-  // Half-cell offset for odd layers (brick pattern)
-  var halfOffset=(tile.layer%2===1)?L.halfCell:0;
-  // Center this layer within the base layer horizontally
-  var layerW=layerCols*TW+(layerCols-1)*L.gapX;
-  var baseW=baseCols*TW+(baseCols-1)*L.gapX;
-  var layerOffX=L.offX+(baseW-layerW)/2+halfOffset;
-  // Center vertically within base rows, then shift up per layer
-  var layerH=layerRows*TH+(layerRows-1)*L.gapY;
-  var baseH_content=baseRows*TH+(baseRows-1)*L.gapY;
-  var layerOffY=L.offY+(baseH_content-layerH)/2-tile.layer*L.layerH;
+  var layerCols=Math.max(1,L.cols-tile.layer);
+  // Each layer starts offset by halfCell from the base layer's start
+  var layerOffX=L.offX+tile.layer*L.halfCellX;
+  var layerOffY=L.offY+tile.layer*L.halfCellY;
   
   var x=layerOffX+tile.col*(TW+L.gapX);
   var y=layerOffY+tile.row*(TH+L.gapY);
