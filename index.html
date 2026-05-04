@@ -109,14 +109,14 @@ function makeTileSprite(type,blocked,w,h,forShelf){
   var rad=w*0.1;
   // Shadow
   g.beginFill(TILE_SHADOW,0.15);g.drawRoundedRect(2,2,w,h,rad);g.endFill();
-  // Background: darker if blocked (under another tile)
-  var bg=blocked?0xD4C4A0:TILE_BG; // darker beige for blocked
+  // Background: pale/washed out if blocked
+  var bg=blocked?0xE8DCC8:TILE_BG; // much paler beige for blocked
   g.beginFill(bg);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
-  // Border: darker brown if blocked
-  var brd=blocked?0x5C4610:TILE_BORDER;
-  g.lineStyle(2,brd,0.7);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
+  // Border: lighter brown if blocked
+  var brd=blocked?0xB09860:TILE_BORDER;
+  g.lineStyle(2,brd,0.5);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
   c.addChild(g);
-  var t=new PIXI.Text(EMOJIS[type],{fontSize:Math.min(w,h)*0.55});t.anchor.set(0.5);t.x=w/2;t.y=h/2;c.addChild(t);
+  var t=new PIXI.Text(EMOJIS[type],{fontSize:Math.min(w,h)*0.55});t.anchor.set(0.5);t.x=w/2;t.y=h/2;t.alpha=blocked?0.3:1;c.addChild(t);
   c.alpha=1;c._tileType=type;c._blocked=blocked;c._w=w;c._h=h;
   c._darkened=blocked;
   return c;
@@ -153,7 +153,7 @@ function animateTripleMatch(sprites,cb){
 }
 
 // ===== CONFETTI =====
-function spawnConfetti(){confettiParticles.forEach(function(p){p.parent&&p.parent.removeChild(p)});confettiParticles=[];var cls=[0xE74C3C,0x3498DB,0x2ECC71,0xF1C40F,0x9B59B6,0xE91E63,0xFF9800,0x00BCD4,0x8BC34A,0xFFC107];for(var i=0;i<300;i++){var g=new PIXI.Graphics();var c=cls[Math.floor(Math.random()*cls.length)];g.beginFill(c);var sz=4+Math.random()*10;var shape=Math.random();if(shape<0.3){g.drawRoundedRect(0,0,sz,sz,2)}else if(shape<0.6){g.drawCircle(0,0,sz/2)}else{g.drawStar(0,0,5,sz/2,sz/4)}g.endFill();g.x=SW*Math.random();g.y=-20-Math.random()*400;g._vx=(Math.random()-0.5)*8;g._vy=Math.random()*5+1;g._rot=(Math.random()-0.5)*0.4;g._alpha=1;stage.addChild(g);confettiParticles.push(g)}}
+function spawnConfetti(){confettiParticles.forEach(function(p){p.parent&&p.parent.removeChild(p)});confettiParticles=[];var cls=[0xE74C3C,0x3498DB,0x2ECC71,0xF1C40F,0x9B59B6,0xE91E63,0xFF9800,0x00BCD4,0x8BC34A,0xFFC107];for(var i=0;i<300;i++){var g=new PIXI.Graphics();var c=cls[Math.floor(Math.random()*cls.length)];g.beginFill(c);var sz=3+Math.random()*9;var shape=Math.random();if(shape<0.25){g.drawRoundedRect(0,0,sz,sz,2)}else if(shape<0.5){g.drawCircle(0,0,sz/2)}else if(shape<0.75){g.moveTo(0,-sz/2);g.lineTo(sz/2,sz/2);g.lineTo(-sz/2,sz/2);g.closePath()}else{g.drawRoundedRect(0,0,sz*1.5,sz*0.6,sz*0.15)}g.endFill();g.x=SW*Math.random();g.y=-20-Math.random()*400;g._vx=(Math.random()-0.5)*8;g._vy=Math.random()*5+2;g._rot=(Math.random()-0.5)*0.4;g._alpha=1;stage.addChild(g);confettiParticles.push(g)}}
 app.ticker.add(function(){if(screenState==='win')confettiParticles.forEach(function(p){p.x+=p._vx;p.y+=p._vy;p._vy+=0.1;p.rotation+=p._rot;p._alpha-=0.002;p.alpha=Math.max(0,p._alpha);if(p.y>SH+20)p._vy=-Math.abs(p._vy)*0.3})});
 
 // ===== GAME LOGIC =====
@@ -375,11 +375,16 @@ function updateBlockedStates(){
         var g=sp.getChildAt(0); // graphics child
         g.clear();
         var rad=TW*0.1;
-        var bg=blocked?0xD4C4A0:TILE_BG;
-        var brd=blocked?0x5C4610:TILE_BORDER;
+        var bg=blocked?0xE8DCC8:TILE_BG;
+        var brd=blocked?0xB09860:TILE_BORDER;
+        var brdAlpha=blocked?0.5:0.7;
         g.beginFill(TILE_SHADOW,0.15);g.drawRoundedRect(2,2,TW,TH,rad);g.endFill();
         g.beginFill(bg);g.drawRoundedRect(0,0,TW,TH,rad);g.endFill();
-        g.lineStyle(2,brd,0.7);g.drawRoundedRect(0,0,TW,TH,rad);g.endFill();
+        g.lineStyle(2,brd,brdAlpha);g.drawRoundedRect(0,0,TW,TH,rad);g.endFill();
+        // Update emoji alpha
+        if(sp.children.length>1){
+          sp.children[1].alpha=blocked?0.3:1;
+        }
         if(blocked){
           tile.sprite.eventMode='none';
           tile.sprite.cursor='default';
