@@ -183,43 +183,41 @@ function calcFieldLayout(){
   var layers=levelConfig.layers;
   var gapRatioX=0.4;var gapRatioY=0.3;
   var ft=TOP_H+BBAR_H;
+  var pad=10; // padding from edges
   
-  // Find smallest baseCols×baseRows that fits all tiles as pyramid
-  var bestCols=3,bestRows=3;
-  for(var tryCols=3;tryCols<=10;tryCols++){
-    for(var tryRows=3;tryRows<=10;tryRows++){
+  // Find bestCols/bestRows where ALL tiles fit as pyramid AND fit on screen
+  var bestCols=0,bestRows=0,bestTileSize=0;
+  
+  for(var tryCols=3;tryCols<=12;tryCols++){
+    for(var tryRows=3;tryRows<=12;tryRows++){
+      // Check capacity
       var cap=0;
       for(var l=0;l<layers;l++){
-        var lc=Math.max(1,tryCols-l);
-        var lr=Math.max(1,tryRows-l);
-        cap+=lc*lr;
+        cap+=Math.max(1,tryCols-l)*Math.max(1,tryRows-l);
       }
-      if(cap>=totalTiles){
-        // Check if these cols/rows fit on screen with some tile size
-        // We'll verify after calculating tile size
-        bestCols=tryCols;bestRows=tryRows;
-        // Try to find minimal rows for this cols
-        break;
+      if(cap<totalTiles)continue;
+      
+      // Calculate tile size that fits this grid on screen
+      var totalFX=tryCols+(layers-1)*0.5;
+      var totalFY=tryRows+(layers-1)*0.5;
+      var tw=(SW-2*pad)/(totalFX*(1+gapRatioX));
+      var th=(FIELD_H-2*pad)/(totalFY*(1+gapRatioY));
+      var tileSize=Math.min(tw,th/1.4);
+      if(tileSize<8)continue; // too small
+      
+      // Prefer grid that gives biggest tiles (most readable)
+      if(tileSize>bestTileSize){
+        bestTileSize=tileSize;
+        bestCols=tryCols;
+        bestRows=tryRows;
       }
     }
-    // Check if minimal rows for this cols already works
-    var cap=0;
-    for(var l=0;l<layers;l++){
-      var lc=Math.max(1,bestCols-l);
-      var lr=Math.max(1,bestRows-l);
-      cap+=lc*lr;
-    }
-    if(cap>=totalTiles)break;
   }
   
-  // Now calculate tile size to fit the base layer in the field area
-  // Base layer needs: bestCols tiles across, bestRows tiles down
-  // With gaps
- var totalFactorX=bestCols+(layers-1)*0.5;
- var totalFactorY=bestRows+(layers-1)*0.5;
- var maxTW=(SW-20)/(totalFactorX*(1+gapRatioX));
- var maxTH=(FIELD_H-20)/(totalFactorY*(1+gapRatioY));
-  TW=Math.min(maxTW,maxTH);
+  if(bestCols===0){bestCols=5;bestRows=4;bestTileSize=30} // fallback
+  
+  // Set tile sizes
+  TW=bestTileSize;
   TH=TW*1.4;
   
   // Recalculate slot sizes
@@ -232,17 +230,20 @@ function calcFieldLayout(){
   var halfCellX=(TW+gapX)/2;
   var halfCellY=(TH+gapY)/2;
   
-  // Base layer dimensions
- var baseW=bestCols*TW+(bestCols-1)*gapX;
- var baseH=bestRows*TH+(bestRows-1)*gapY;
- // Total bounding box: base + halfCell offsets from higher layers
- var totalW=baseW+(layers-1)*halfCellX;
- var totalH=baseH+(layers-1)*halfCellY;
-
- var offX=(SW-totalW)/2;
- var offY=ft+(FIELD_H-totalH)/2;
- if(offY<ft)offY=ft;
- if(offX<0)offX=0;
+  // Total bounding box
+  var baseW=bestCols*TW+(bestCols-1)*gapX;
+  var baseH=bestRows*TH+(bestRows-1)*gapY;
+  var totalW=baseW+(layers-1)*halfCellX;
+  var totalH=baseH+(layers-1)*halfCellY;
+  
+  // Center in field area — GUARANTEE all tiles between panels
+  var offX=(SW-totalW)/2;
+  var offY=ft+(FIELD_H-totalH)/2;
+  // Clamp to field boundaries
+  if(offY<ft)offY=ft;
+  if(offY+totalH>ft+FIELD_H)offY=ft+FIELD_H-totalH;
+  if(offX<0)offX=0;
+  if(offX+totalW>SW)offX=SW-totalW;
   
   fieldLayout.cols=bestCols;
   fieldLayout.rows=bestRows;
