@@ -300,6 +300,7 @@ function boosterHint(){if(boosterCounts.hint<=0)return;boosterCounts.hint--;var 
 // ===== TILE CLICK =====
 function onTileClick(tile){
   if(screenState!=='play')return;
+  if(tile.removed)return;
   if(isBlocked(tile)){if(tile.sprite)animateShake(tile.sprite);return}
   var slotIdx=-1;for(var i=0;i<maxShelf;i++){if(shelfItems[i]===null){slotIdx=i;break}}
   if(slotIdx===-1){checkLose();return}
@@ -309,53 +310,49 @@ function onTileClick(tile){
 
   var sp=tile.sprite;
   var fromX=sp.x;var fromY=sp.y;
+  sp.visible=false;
+  sp.eventMode='none';
 
-  animateScale(sp,1,0.85,80,function(){
-    animateScale(sp,0.85,1.1,100,function(){
-      var fly=makeTileSprite(tile.type,false,SLOT_W,SLOT_H,true);
-      var fieldCX=fromX+TW/2;
-      var fieldCY=fromY+TH/2;
-      fly.x=fieldCX-SLOT_W/2;
-      fly.y=fieldCY-SLOT_H/2;
-      fly.scale.set(TW/SLOT_W,TH/SLOT_H);
-      flyLayer.addChild(fly);
-      sp.visible=false;
+  var fly=makeTileSprite(tile.type,false,SLOT_W,SLOT_H,true);
+  var fieldCX=fromX+TW/2;
+  var fieldCY=fromY+TH/2;
+  fly.x=fieldCX-SLOT_W/2;
+  fly.y=fieldCY-SLOT_H/2;
+  fly.scale.set(TW/SLOT_W,TH/SLOT_H);
+  flyLayer.addChild(fly);
 
-      var shelfStartX=(SW-maxShelf*(SLOT_W+3))/2;
-      var targetX=shelfStartX+slotIdx*(SLOT_W+3);
-      var targetY=SH-SHELF_H+(SHELF_H-SLOT_H)/2;
-      var targetCX=targetX+SLOT_W/2;
-      var targetCY=targetY+SLOT_H/2;
+  var shelfStartX=(SW-maxShelf*(SLOT_W+3))/2;
+  var targetX=shelfStartX+slotIdx*(SLOT_W+3);
+  var targetY=SH-SHELF_H+(SHELF_H-SLOT_H)/2;
+  var targetCX=targetX+SLOT_W/2;
+  var targetCY=targetY+SLOT_H/2;
 
-      var dur=300;var s=performance.now();
-      var sx0=TW/SLOT_W,sy0=TH/SLOT_H;var sx1=1,sy1=1;
+  var dur=300;var s=performance.now();
+  var sx0=TW/SLOT_W,sy0=TH/SLOT_H;var sx1=1,sy1=1;
 
-      function flyTick(){
-        var t=Math.min((performance.now()-s)/dur,1);
-        var e=easeOutCubic(t);
-        var csx=sx0+(sx1-sx0)*e;
-        var csy=sy0+(sy1-sy0)*e;
-        fly.scale.set(csx,csy);
-        var cx=fieldCX+(targetCX-fieldCX)*e;
-        var cy=fieldCY+(targetCY-fieldCY)*e;
-        fly.x=cx-(SLOT_W*csx)/2;
-        fly.y=cy-(SLOT_H*csy)/2;
-        if(t<1)requestAnimationFrame(flyTick);
-        else{
-          shelfItems[slotIdx]=fly;
-          fly.x=targetX;fly.y=targetY;
-          fly.scale.set(1,1);
-          shelfContainer.addChild(fly);
-          flyLayer.removeChild(fly);
-          
-          updateBlockedStates();
-          checkTriple();
-          setTimeout(function(){checkLose()},350);
-        }
-      }
-      requestAnimationFrame(flyTick);
-    });
-  });
+  function flyTick(){
+    var t=Math.min((performance.now()-s)/dur,1);
+    var e=easeOutCubic(t);
+    var csx=sx0+(sx1-sx0)*e;
+    var csy=sy0+(sy1-sy0)*e;
+    fly.scale.set(csx,csy);
+    var cx=fieldCX+(targetCX-fieldCX)*e;
+    var cy=fieldCY+(targetCY-fieldCY)*e;
+    fly.x=cx-(SLOT_W*csx)/2;
+    fly.y=cy-(SLOT_H*csy)/2;
+    if(t<1)requestAnimationFrame(flyTick);
+    else{
+      shelfItems[slotIdx]=fly;
+      fly.x=targetX;fly.y=targetY;
+      fly.scale.set(1,1);
+      shelfContainer.addChild(fly);
+      flyLayer.removeChild(fly);
+      updateBlockedStates();
+      checkTriple();
+      setTimeout(function(){checkLose()},350);
+    }
+  }
+  requestAnimationFrame(flyTick);
 }
 
 function updateBlockedStates(){
