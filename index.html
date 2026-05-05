@@ -115,7 +115,7 @@ function makeTileSprite(type,blocked,w,h,forShelf){
   var brd=blocked?0xB09860:TILE_BORDER;
   g.lineStyle(2,brd,0.5);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
   c.addChild(g);
-  var t=new PIXI.Text(EMOJIS[type],{fontSize:Math.min(w,h)*0.55});t.anchor.set(0.5);t.x=w/2;t.y=h/2;t.alpha=blocked?0.3:1;c.addChild(t);
+  var t=new PIXI.Text(EMOJIS[type],{fontSize:Math.min(w,h)*0.55});t.anchor.set(0.5);t.x=w/2;t.y=h/2;t.alpha=blocked?0.5:1;c.addChild(t);
   c.alpha=1;c._tileType=type;c._blocked=blocked;c._w=w;c._h=h;
   c._darkened=blocked;
   return c;
@@ -382,7 +382,7 @@ function updateBlockedStates(){
         g.lineStyle(2,brd,brdAlpha);g.drawRoundedRect(0,0,TW,TH,rad);g.endFill();
         // Update emoji alpha
         if(sp.children.length>1){
-          sp.children[1].alpha=blocked?0.3:1;
+          sp.children[1].alpha=blocked?0.5:1;
         }
         if(blocked){
           tile.sprite.eventMode='none';
