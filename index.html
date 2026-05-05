@@ -322,6 +322,7 @@ function onTileClick(tile){
   if(slotIdx===-1){checkLose();return}
   // slot already found above, no extra check needed
   tile.removed=true;
+ shelfSlots[slotIdx]={type:tile.type,sprite:null,flying:true};
   undoStack.push({tile:tile,shelfIdx:slotIdx});
 
   var sp=tile.sprite;
