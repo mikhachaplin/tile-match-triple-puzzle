@@ -288,8 +288,8 @@ function isBlocked(tile){
   return false;
 }
 
-function checkTriple(){for(var t=0;t<10;t++){var m=shelfItems.filter(function(s){return s&&s._tileType===t});if(m.length>=3){var rm=m.slice(0,3);rm.forEach(function(s){var idx=shelfItems.indexOf(s);shelfItems[idx]=null});animateTripleMatch(rm,function(){rm.forEach(function(s){s.parent&&s.parent.removeChild(s)});rebuildShelfVisuals();checkWin()});score+=30;updateScoreText();return true}}return false}
-function checkLose(){if(shelfItems.filter(function(s){return s!==null}).length>=maxShelf){screenState='lose';drawLose()}}
+function checkTriple(){for(var t=0;t<10;t++){var m=shelfItems.filter(function(s){return s&&s!=='_flying_'&&s._tileType===t});if(m.length>=3){var rm=m.slice(0,3);rm.forEach(function(s){var idx=shelfItems.indexOf(s);shelfItems[idx]=null});animateTripleMatch(rm,function(){rm.forEach(function(s){s.parent&&s.parent.removeChild(s)});rebuildShelfVisuals();checkWin()});score+=30;updateScoreText();return true}}return false}
+function checkLose(){if(shelfItems.filter(function(s){return s!==null&&s!=='_flying_'}).length>=maxShelf){screenState='lose';drawLose()}}
 function checkWin(){if(tiles.filter(function(t){return!t.removed}).length===0){screenState='win';drawWin()}}
 
 function boosterUndo(){if(boosterCounts.undo<=0||undoStack.length===0)return;boosterCounts.undo--;var last=undoStack.pop();if(!last)return;last.tile.removed=false;shelfItems[last.shelfIdx]=null;rebuildPlayScreen()}
@@ -304,7 +304,7 @@ function onTileClick(tile){
   if(isBlocked(tile)){if(tile.sprite)animateShake(tile.sprite);return}
   var slotIdx=-1;for(var i=0;i<maxShelf;i++){if(shelfItems[i]===null){slotIdx=i;break}}
   if(slotIdx===-1){checkLose();return}
-  if(shelfItems.filter(function(s){return s!==null}).length>=maxShelf){checkLose();return}
+  if(shelfItems.filter(function(s){return s!==null&&s!=='_flying_'}).length>=maxShelf){checkLose();return}
   tile.removed=true;
   undoStack.push({tile:tile,shelfIdx:slotIdx});
 
