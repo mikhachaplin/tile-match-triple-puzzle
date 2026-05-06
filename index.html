@@ -16,170 +16,156 @@ canvas{display:block;position:fixed;top:0;left:0}
 #editor-panel .btn-row{margin-top:16px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 #editor-panel button{padding:10px 16px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:bold;color:#fff}
 .btn-apply{background:#27AE60}.btn-export{background:#2980B9}.btn-import{background:#E67E22}.btn-close{background:#C0392B}
+#log-panel{display:none;position:fixed;top:8%;left:5%;width:90%;height:78%;background:rgba(20,20,20,0.95);border-radius:12px;padding:16px;z-index:200;display:flex;flex-direction:column}
+#log-panel textarea{flex:1;width:100%;background:#111;color:#0f0;border:1px solid #333;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;resize:none}
+#log-panel .log-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+#log-panel .log-header span{color:#fff;font-size:16px;font-weight:bold}
+#log-panel button{padding:8px 16px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;color:#fff;margin-left:8px}
 </style>
 </head>
 <body>
 <div id="editor-panel">
 <h2>🔧 Редактор уровней</h2>
 <label>Типы карточек: <span class="val" id="val-types">8</span></label>
-<input type="range" id="sl-types" min="5" max="15" value="8">
+<input type="range" id="sl-types" min="4" max="15" value="8">
 <label>Слои: <span class="val" id="val-layers">2</span></label>
-<input type="range" id="sl-layers" min="1" max="5" value="2">
+<input type="range" id="sl-layers" min="1" max="3" value="2">
 <label>Карточек на тип: <span class="val" id="val-pertype">6</span></label>
 <input type="range" id="sl-pertype" min="3" max="12" step="3" value="6">
 <label>Бустеры: <span class="val" id="val-boosters">3</span></label>
 <input type="range" id="sl-boosters" min="0" max="10" value="3">
 <div class="btn-row">
 <button class="btn-apply" onclick="applyEditor()">Применить</button>
-<button class="btn-export" onclick="exportJSON()">Экспорт JSON</button>
-<button class="btn-import" onclick="document.getElementById('importFile').click()">Импорт JSON</button>
+<button class="btn-export" onclick="exportJSON()">Экспорт</button>
+<button class="btn-import" onclick="document.getElementById('importFile').click()">Импорт</button>
 <button class="btn-close" onclick="toggleEditor()">Закрыть</button>
 <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)">
 </div>
+</div>
+<div id="log-panel">
+<div class="log-header">
+<span>📋 Game Log</span>
+<div>
+<button style="background:#27AE60" onclick="copyLog()">📋 Копировать</button>
+<button style="background:#C0392B" onclick="document.getElementById('log-panel').style.display='none'">✕</button>
+</div>
+</div>
+<textarea id="logText" readonly></textarea>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/pixi.js@7/dist/pixi.min.js"></script>
 <script>
 (function(){var p=prompt('Пароль:');if(btoa(p||'')!==btoa('tile123'))location.reload()})();
 
+// ===== EASING =====
 function easeOutCubic(t){return 1-Math.pow(1-t,3)}
 function easeOutBack(t){var c1=1.70158,c3=c1+1;return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2)}
 
-var app,stage;
+// ===== CONSTANTS =====
 var COLORS=['#E74C3C','#E67E22','#F1C40F','#9B59B6','#E91E63','#FF9800','#8BC34A','#FFC107','#F44336','#00BCD4'];
 var EMOJIS=['🍎','🍊','🍋','🍇','🍓','🍑','🥝','🍌','🍒','🫐'];
+var TILE_BG=0xF5E6C8;
+var TILE_BORDER=0x8B6914;
+var BLOCKED_BG=0xE8DCC8;
+var BLOCKED_BORDER=0xB09860;
+
+// ===== STATE =====
 var screenState='menu';
 var tiles=[],shelfSlots=[];
 var score=0,level=1,maxShelf=7;
-var undoStack=[];
+var undoStack=[],gameLog=[];
 var levelConfig={types:8,layers:2,perType:6,boosters:3};
 var boosterCounts={undo:3,shuffle:3,extraSlot:3,hint:3};
 var fieldContainer,shelfContainer,flyLayer,topBar;
 var confettiParticles=[];
 var flyingCount=0;
-var gameLog=[];
-
-// Tile colors — beige/sand background, brown border
-var TILE_BG=0xF5E6C8;   // beige/sand
-var TILE_BORDER=0x8B6914; // brown
-var TILE_SHADOW=0x000000;
-
 var SW,SH,TW,TH,SLOT_W,SLOT_H;
 var TOP_H,BBAR_H,FIELD_H,SHELF_H;
-var fieldLayout={offX:0,offY:0,gapX:0,gapY:0,cols:0};
+var fieldLayout={offX:0,offY:0,gapX:0,gapY:0,cols:0,rows:0,halfCellX:0,halfCellY:0};
 
-app=new PIXI.Application({width:window.innerWidth,height:window.innerHeight,backgroundColor:0x000000,resolution:window.devicePixelRatio||1,autoDensity:true});
+// ===== PIXI INIT =====
+var app=new PIXI.Application({width:window.innerWidth,height:window.innerHeight,backgroundColor:0x000000,resolution:window.devicePixelRatio||1,autoDensity:true});
 document.body.appendChild(app.view);
-stage=app.stage;
+var stage=app.stage;
 stage.sortableChildren=true;
 stage.eventMode='static';
 
+// ===== SIZING =====
 function calcSizes(){
   SW=window.innerWidth;SH=window.innerHeight;
   TOP_H=Math.max(SH*0.07,38);
   BBAR_H=Math.max(SH*0.06,36);
   SHELF_H=Math.max(SH*0.14,58);
   FIELD_H=SH-TOP_H-BBAR_H-SHELF_H;
-  // Tile sizes will be calculated in calcFieldLayout based on pyramid fit
-  TW=50;TH=70; // initial, will be recalculated
-  SLOT_W=(SW-20)/8-3;
-  SLOT_H=SLOT_W*1.4;
+  SLOT_W=(SW-20)/8-3;SLOT_H=SLOT_W*1.4;
   if(SLOT_H>SHELF_H-8){SLOT_H=SHELF_H-8;SLOT_W=SLOT_H/1.4}
 }
 calcSizes();
 
-function addLog(msg){gameLog.push(msg);try{localStorage.setItem('tileMatchLog',JSON.stringify(gameLog))}catch(e){}}
-function getLogText(){
-  var header='=== Tile Match Log ===\nLevel: '+level+' | Types: '+levelConfig.types+' | Layers: '+levelConfig.layers+' | PerType: '+levelConfig.perType+'\n';
-  header+='Grid: '+fieldLayout.cols+'x'+fieldLayout.rows+' | MaxShelf: '+maxShelf+'\n';
-  header+='Screen: '+SW+'x'+SH+' | TW: '+Math.round(TW)+' TH: '+Math.round(TH)+'\n\n';
-  return header+gameLog.join('\n');
-}
-function showLogPanel(){
-  var existing=document.getElementById('log-panel');
-  if(existing){existing.style.display=existing.style.display==='none'?'block':'none';return}
-  var div=document.createElement('div');div.id='log-panel';
-  div.style.cssText='position:fixed;top:10%;left:5%;width:90%;height:75%;background:rgba(20,20,20,0.95);border-radius:12px;padding:16px;z-index:200;display:flex;flex-direction:column;';
-  div.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="color:#fff;font-size:16px;font-weight:bold">📋 Game Log</span><div><button id="copyLogBtn" style="background:#27AE60;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold;margin-right:8px">📋 Копировать</button><button id="closeLogBtn" style="background:#C0392B;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold">✕ Закрыть</button></div></div><textarea id="logText" style="flex:1;width:100%;background:#111;color:#0f0;border:1px solid #333;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;resize:none" readonly></textarea>';
-  document.body.appendChild(div);
-  document.getElementById('logText').value=getLogText();
-  document.getElementById('copyLogBtn').onclick=function(){var ta=document.getElementById('logText');ta.select();document.execCommand('copy');navigator.clipboard&&navigator.clipboard.writeText(ta.value);document.getElementById('copyLogBtn').textContent='✅ Скопировано!';setTimeout(function(){document.getElementById('copyLogBtn').textContent='📋 Копировать'},2000)};
-  document.getElementById('closeLogBtn').onclick=function(){div.style.display='none'};
-}
-
-
 window.addEventListener('resize',function(){
   app.renderer.resize(window.innerWidth,window.innerHeight);
   calcSizes();
-
-function addLog(msg){gameLog.push(msg);try{localStorage.setItem('tileMatchLog',JSON.stringify(gameLog))}catch(e){}}
-function getLogText(){
-  var header='=== Tile Match Log ===\nLevel: '+level+' | Types: '+levelConfig.types+' | Layers: '+levelConfig.layers+' | PerType: '+levelConfig.perType+'\n';
-  header+='Grid: '+fieldLayout.cols+'x'+fieldLayout.rows+' | MaxShelf: '+maxShelf+'\n';
-  header+='Screen: '+SW+'x'+SH+' | TW: '+Math.round(TW)+' TH: '+Math.round(TH)+'\n\n';
-  return header+gameLog.join('\n');
-}
-function showLogPanel(){
-  var existing=document.getElementById('log-panel');
-  if(existing){existing.style.display=existing.style.display==='none'?'block':'none';return}
-  var div=document.createElement('div');div.id='log-panel';
-  div.style.cssText='position:fixed;top:10%;left:5%;width:90%;height:75%;background:rgba(20,20,20,0.95);border-radius:12px;padding:16px;z-index:200;display:flex;flex-direction:column;';
-  div.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="color:#fff;font-size:16px;font-weight:bold">📋 Game Log</span><div><button id="copyLogBtn" style="background:#27AE60;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold;margin-right:8px">📋 Копировать</button><button id="closeLogBtn" style="background:#C0392B;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold">✕ Закрыть</button></div></div><textarea id="logText" style="flex:1;width:100%;background:#111;color:#0f0;border:1px solid #333;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;resize:none" readonly></textarea>';
-  document.body.appendChild(div);
-  document.getElementById('logText').value=getLogText();
-  document.getElementById('copyLogBtn').onclick=function(){var ta=document.getElementById('logText');ta.select();document.execCommand('copy');navigator.clipboard&&navigator.clipboard.writeText(ta.value);document.getElementById('copyLogBtn').textContent='✅ Скопировано!';setTimeout(function(){document.getElementById('copyLogBtn').textContent='📋 Копировать'},2000)};
-  document.getElementById('closeLogBtn').onclick=function(){div.style.display='none'};
-}
-
   if(screenState==='play')rebuildPlayScreen();
   if(screenState==='menu')drawMenu();
 });
 
+// ===== LOGGING =====
+function addLog(msg){
+  gameLog.push(msg);
+  try{localStorage.setItem('tileMatchLog',JSON.stringify(gameLog))}catch(e){}
+}
+function getLogText(){
+  var h='=== Tile Match Log ===\n';
+  h+='Level: '+level+' | Types: '+levelConfig.types+' | Layers: '+(levelConfig.effectiveLayers||levelConfig.layers);
+  h+=' | PerType: '+(levelConfig.effectivePerType||levelConfig.perType)+'\n';
+  h+='Grid: '+fieldLayout.cols+'x'+fieldLayout.rows+' | MaxShelf: '+maxShelf+'\n';
+  h+='Screen: '+SW+'x'+SH+' | TW: '+Math.round(TW)+' TH: '+Math.round(TH)+'\n\n';
+  return h+gameLog.join('\n');
+}
+function showLogPanel(){
+  var p=document.getElementById('log-panel');
+  p.style.display='flex';
+  document.getElementById('logText').value=getLogText();
+}
+function copyLog(){
+  var ta=document.getElementById('logText');ta.select();
+  document.execCommand('copy');
+  if(navigator.clipboard)navigator.clipboard.writeText(ta.value);
+}
+
 // ===== EDITOR =====
 function toggleEditor(){var p=document.getElementById('editor-panel');p.style.display=p.style.display==='none'?'block':'none'}
 document.addEventListener('keydown',function(e){if(e.key==='e'||e.key==='E')toggleEditor()});
-['types','layers','pertype','boosters'].forEach(function(k){var sl=document.getElementById('sl-'+k);sl.oninput=function(){document.getElementById('val-'+k).textContent=this.value}});
-function applyEditor(){levelConfig.types=+document.getElementById('sl-types').value;levelConfig.layers=+document.getElementById('sl-layers').value;levelConfig.perType=+document.getElementById('sl-pertype').value;levelConfig.boosters=+document.getElementById('sl-boosters').value;boosterCounts={undo:levelConfig.boosters,shuffle:levelConfig.boosters,extraSlot:levelConfig.boosters,hint:levelConfig.boosters};toggleEditor();calcSizes();
-
-function addLog(msg){gameLog.push(msg);try{localStorage.setItem('tileMatchLog',JSON.stringify(gameLog))}catch(e){}}
-function getLogText(){
-  var header='=== Tile Match Log ===\nLevel: '+level+' | Types: '+levelConfig.types+' | Layers: '+levelConfig.layers+' | PerType: '+levelConfig.perType+'\n';
-  header+='Grid: '+fieldLayout.cols+'x'+fieldLayout.rows+' | MaxShelf: '+maxShelf+'\n';
-  header+='Screen: '+SW+'x'+SH+' | TW: '+Math.round(TW)+' TH: '+Math.round(TH)+'\n\n';
-  return header+gameLog.join('\n');
+['types','layers','pertype','boosters'].forEach(function(k){
+  var sl=document.getElementById('sl-'+k);
+  sl.oninput=function(){document.getElementById('val-'+k).textContent=this.value};
+});
+function applyEditor(){
+  levelConfig.types=+document.getElementById('sl-types').value;
+  levelConfig.layers=+document.getElementById('sl-layers').value;
+  levelConfig.perType=+document.getElementById('sl-pertype').value;
+  levelConfig.boosters=+document.getElementById('sl-boosters').value;
+  boosterCounts={undo:levelConfig.boosters,shuffle:levelConfig.boosters,extraSlot:levelConfig.boosters,hint:levelConfig.boosters};
+  toggleEditor();calcSizes();startGame();
 }
-function showLogPanel(){
-  var existing=document.getElementById('log-panel');
-  if(existing){existing.style.display=existing.style.display==='none'?'block':'none';return}
-  var div=document.createElement('div');div.id='log-panel';
-  div.style.cssText='position:fixed;top:10%;left:5%;width:90%;height:75%;background:rgba(20,20,20,0.95);border-radius:12px;padding:16px;z-index:200;display:flex;flex-direction:column;';
-  div.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="color:#fff;font-size:16px;font-weight:bold">📋 Game Log</span><div><button id="copyLogBtn" style="background:#27AE60;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold;margin-right:8px">📋 Копировать</button><button id="closeLogBtn" style="background:#C0392B;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold">✕ Закрыть</button></div></div><textarea id="logText" style="flex:1;width:100%;background:#111;color:#0f0;border:1px solid #333;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;resize:none" readonly></textarea>';
-  document.body.appendChild(div);
-  document.getElementById('logText').value=getLogText();
-  document.getElementById('copyLogBtn').onclick=function(){var ta=document.getElementById('logText');ta.select();document.execCommand('copy');navigator.clipboard&&navigator.clipboard.writeText(ta.value);document.getElementById('copyLogBtn').textContent='✅ Скопировано!';setTimeout(function(){document.getElementById('copyLogBtn').textContent='📋 Копировать'},2000)};
-  document.getElementById('closeLogBtn').onclick=function(){div.style.display='none'};
-}
-startGame()}
 function exportJSON(){var b=new Blob([JSON.stringify(levelConfig,null,2)],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tile-match-config.json';a.click()}
 function importJSON(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(ev){levelConfig=JSON.parse(ev.target.result);applyEditor()};r.readAsText(f)}
 
-// ===== SPRITE HELPERS =====
-function makeTileSprite(type,blocked,w,h,forShelf){
+// ===== SPRITES =====
+function makeTileSprite(type,blocked,w,h){
   var c=new PIXI.Container();
   var g=new PIXI.Graphics();
-  var color=PIXI.utils.string2hex(COLORS[type]);
   var rad=w*0.1;
-  // Shadow
-  g.beginFill(TILE_SHADOW,0.15);g.drawRoundedRect(2,2,w,h,rad);g.endFill();
-  // Background: pale/washed out if blocked
-  var bg=blocked?0xE8DCC8:TILE_BG; // much paler beige for blocked
+  g.beginFill(0x000000,0.15);g.drawRoundedRect(2,2,w,h,rad);g.endFill();
+  var bg=blocked?BLOCKED_BG:TILE_BG;
   g.beginFill(bg);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
-  // Border: lighter brown if blocked
-  var brd=blocked?0xB09860:TILE_BORDER;
-  g.lineStyle(2,brd,0.5);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
+  var brd=blocked?BLOCKED_BORDER:TILE_BORDER;
+  var brdA=blocked?0.5:0.7;
+  g.lineStyle(2,brd,brdA);g.drawRoundedRect(0,0,w,h,rad);g.endFill();
   c.addChild(g);
-  var t=new PIXI.Text(EMOJIS[type],{fontSize:Math.min(w,h)*0.55});t.anchor.set(0.5);t.x=w/2;t.y=h/2;t.alpha=blocked?0.5:1;c.addChild(t);
-  c.alpha=1;c._tileType=type;c._blocked=blocked;c._w=w;c._h=h;
-  c._darkened=blocked;
+  var t=new PIXI.Text(EMOJIS[type],{fontSize:Math.min(w,h)*0.55});
+  t.anchor.set(0.5);t.x=w/2;t.y=h/2;t.alpha=blocked?0.5:1;
+  c.addChild(t);
+  c._tileType=type;c._blocked=blocked;c._w=w;c._h=h;
   return c;
 }
 function makeSlotSprite(){
@@ -190,8 +176,7 @@ function makeButton(text,color,w,h,cb){
   var c=new PIXI.Container();c.eventMode='static';c.cursor='pointer';
   var g=new PIXI.Graphics();g.beginFill(color);g.drawRoundedRect(0,0,w,h,h*0.3);g.endFill();c.addChild(g);
   var t=new PIXI.Text(text,{fontSize:h*0.38,fill:0xFFFFFF,fontWeight:'bold'});t.anchor.set(0.5);t.x=w/2;t.y=h/2;c.addChild(t);
-  c.on('pointerdown',function(){animateScale(c,1,0.92,60,function(){animateScale(c,0.92,1,80)})});
-  c.on('pointerdown',function(){if(cb)cb()});
+  if(cb)c.on('pointertap',cb);
   return c;
 }
 
@@ -200,7 +185,6 @@ function animateScale(obj,from,to,dur,cb){var s=performance.now();function tick(
 function animateShake(obj,cb){var ox=obj.x;var i=0;function step(){if(i>=6){obj.x=ox;if(cb)cb();return}obj.x=ox+(i%2===0?5:-5);i++;setTimeout(step,40)}step()}
 function animatePulse(obj){if(obj._pulsing)return;obj._pulsing=true;var s=performance.now();function tick(){if(!obj._pulsing)return;var t=((performance.now()-s)%600)/600;obj.scale.set(1+0.1*Math.sin(t*Math.PI*2));requestAnimationFrame(tick)}requestAnimationFrame(tick)}
 function stopPulse(obj){obj._pulsing=false;obj.scale.set(1)}
-
 function animateTripleMatch(sprites,cb){
   var dur=350;var s=performance.now();
   var anchors=sprites.map(function(sp){return{x:sp.x,y:sp.y,w:sp._w||SLOT_W,h:sp._h||SLOT_H}});
@@ -214,22 +198,110 @@ function animateTripleMatch(sprites,cb){
 }
 
 // ===== CONFETTI =====
-function spawnConfetti(){confettiParticles.forEach(function(p){p.parent&&p.parent.removeChild(p)});confettiParticles=[];var cls=[0xE74C3C,0x3498DB,0x2ECC71,0xF1C40F,0x9B59B6,0xE91E63,0xFF9800,0x00BCD4,0x8BC34A,0xFFC107];for(var i=0;i<300;i++){var g=new PIXI.Graphics();var c=cls[Math.floor(Math.random()*cls.length)];g.beginFill(c);var sz=3+Math.random()*9;var shape=Math.random();if(shape<0.25){g.drawRoundedRect(0,0,sz,sz,2)}else if(shape<0.5){g.drawCircle(0,0,sz/2)}else if(shape<0.75){g.moveTo(0,-sz/2);g.lineTo(sz/2,sz/2);g.lineTo(-sz/2,sz/2);g.closePath()}else{g.drawRoundedRect(0,0,sz*1.5,sz*0.6,sz*0.15)}g.endFill();g.x=SW*Math.random();g.y=-20-Math.random()*400;g._vx=(Math.random()-0.5)*8;g._vy=Math.random()*5+2;g._rot=(Math.random()-0.5)*0.4;g._alpha=1;stage.addChild(g);confettiParticles.push(g)}}
-app.ticker.add(function(){if(screenState==='win')confettiParticles.forEach(function(p){p.x+=p._vx;p.y+=p._vy;p._vy+=0.1;p.rotation+=p._rot;p._alpha-=0.002;p.alpha=Math.max(0,p._alpha);if(p.y>SH+20)p._vy=-Math.abs(p._vy)*0.3})});
+function spawnConfetti(){
+  confettiParticles.forEach(function(p){p.parent&&p.parent.removeChild(p)});confettiParticles=[];
+  var cls=[0xE74C3C,0x3498DB,0x2ECC71,0xF1C40F,0x9B59B6,0xE91E63,0xFF9800,0x00BCD4,0x8BC34A,0xFFC107];
+  for(var i=0;i<300;i++){
+    var g=new PIXI.Graphics();var c=cls[Math.floor(Math.random()*cls.length)];g.beginFill(c);
+    var sz=3+Math.random()*9;var shape=Math.random();
+    if(shape<0.25){g.drawRoundedRect(0,0,sz,sz,2)}
+    else if(shape<0.5){g.drawCircle(0,0,sz/2)}
+    else if(shape<0.75){g.moveTo(0,-sz/2);g.lineTo(sz/2,sz/2);g.lineTo(-sz/2,sz/2);g.closePath()}
+    else{g.drawRoundedRect(0,0,sz*1.5,sz*0.6,sz*0.15)}
+    g.endFill();g.x=SW*Math.random();g.y=-20-Math.random()*400;
+    g._vx=(Math.random()-0.5)*8;g._vy=Math.random()*5+2;g._rot=(Math.random()-0.5)*0.4;g._alpha=1;
+    stage.addChild(g);confettiParticles.push(g);
+  }
+}
+app.ticker.add(function(){
+  if(screenState==='win')confettiParticles.forEach(function(p){
+    p.x+=p._vx;p.y+=p._vy;p._vy+=0.1;p.rotation+=p._rot;p._alpha-=0.002;p.alpha=Math.max(0,p._alpha);
+    if(p.y>SH+20)p._vy=-Math.abs(p._vy)*0.3;
+  });
+});
+
+// ===== FIELD LAYOUT =====
+function calcFieldLayout(){
+  var perType=levelConfig.perType;
+  if(perType%3!==0)perType=Math.ceil(perType/3)*3;
+  levelConfig.effectivePerType=perType;
+  var totalTiles=levelConfig.types*perType;
+
+  // Limit layers: top layer must have >= 3x3 = 9 cells
+  var layers=levelConfig.layers;
+  if(layers>3)layers=3;
+  levelConfig.effectiveLayers=layers;
+
+  var gapRatioX=0.4;var gapRatioY=0.3;
+  var ft=TOP_H+BBAR_H;
+
+  // Find best grid
+  var bestCols=0,bestRows=0,bestTileSize=0;
+  for(var tryCols=3;tryCols<=10;tryCols++){
+    for(var tryRows=3;tryRows<=10;tryRows++){
+      var cap=0;
+      for(var l=0;l<layers;l++)cap+=Math.max(1,tryCols-l)*Math.max(1,tryRows-l);
+      if(cap<totalTiles)continue;
+      var totalFX=tryCols+(layers-1)*0.5;
+      var totalFY=tryRows+(layers-1)*0.5;
+      var tw=(SW-20)/(totalFX*(1+gapRatioX));
+      var th=(FIELD_H-20)/(totalFY*(1+gapRatioY));
+      var ts=Math.min(tw,th/1.4);
+      if(ts<8)continue;
+      if(ts>bestTileSize){bestTileSize=ts;bestCols=tryCols;bestRows=tryRows}
+    }
+  }
+  if(bestCols===0){bestCols=5;bestRows=4;bestTileSize=30}
+
+  TW=bestTileSize;TH=TW*1.4;
+  var gapX=TW*gapRatioX;var gapY=TH*gapRatioY;
+  var halfCellX=(TW+gapX)/2;var halfCellY=(TH+gapY)/2;
+  var baseW=bestCols*TW+(bestCols-1)*gapX;
+  var baseH=bestRows*TH+(bestRows-1)*gapY;
+  var totalW=baseW+(layers-1)*halfCellX;
+  var totalH=baseH+(layers-1)*halfCellY;
+  var offX=(SW-totalW)/2;
+  var offY=ft+(FIELD_H-totalH)/2;
+  if(offY<ft)offY=ft;
+
+  fieldLayout={offX:offX,offY:offY,gapX:gapX,gapY:gapY,cols:bestCols,rows:bestRows,halfCellX:halfCellX,halfCellY:halfCellY};
+}
+
+function getTilePos(tile){
+  var L=fieldLayout;
+  var layerCols=Math.max(1,L.cols-tile.layer);
+  var halfOff=tile.layer*L.halfCellX;
+  var vertOff=tile.layer*L.halfCellY;
+  return{
+    x:L.offX+halfOff+tile.col*(TW+L.gapX),
+    y:L.offY+vertOff+tile.row*(TH+L.gapY)
+  };
+}
+
+function isBlocked(tile){
+  for(var i=0;i<tiles.length;i++){
+    var t=tiles[i];
+    if(t===tile||t.removed||t.layer<=tile.layer)continue;
+    var tp=getTilePos(t);var mp=getTilePos(tile);
+    if(tp.x<mp.x+TW&&tp.x+TW>mp.x&&tp.y<mp.y+TH&&tp.y+TH>mp.y)return true;
+  }
+  return false;
+}
 
 // ===== GAME LOGIC =====
-function generateTiles(){gameLog=[];
-  tiles=[];
-  var total=levelConfig.types*levelConfig.perType;
-  var types=[];for(var t=0;t<levelConfig.types;t++)for(var j=0;j<levelConfig.perType;j++)types.push(t);
+function generateTiles(){
+  gameLog=[];
+  var perType=levelConfig.effectivePerType||levelConfig.perType;
+  var layers=levelConfig.effectiveLayers||levelConfig.layers;
+  var total=levelConfig.types*perType;
+  var types=[];
+  for(var t=0;t<levelConfig.types;t++)for(var j=0;j<perType;j++)types.push(t);
   for(var i=types.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var tmp=types[i];types[i]=types[j];types[j]=tmp}
-  var baseCols=fieldLayout.cols;
-  var baseRows=fieldLayout.rows;
+  tiles=[];
   var idx=0;
-  var effectiveLayers=levelConfig.effectiveLayers||levelConfig.layers;for(var layer=0;layer<effectiveLayers;layer++){
-    // Each layer: (baseCols-layer) columns, (baseRows-layer) rows
-    var layerCols=Math.max(1,baseCols-layer);
-    var layerRows=Math.max(1,baseRows-layer);
+  for(var layer=0;layer<layers;layer++){
+    var layerCols=Math.max(1,fieldLayout.cols-layer);
+    var layerRows=Math.max(1,fieldLayout.rows-layer);
     var layerCount=layerCols*layerRows;
     for(var i=0;i<layerCount&&idx<total;i++){
       var r=Math.floor(i/layerCols);var c=i%layerCols;
@@ -237,237 +309,147 @@ function generateTiles(){gameLog=[];
       idx++;
     }
   }
+  // Log generation
+  addLog('--- LEVEL '+level+' ---');
+  addLog('Config: types='+levelConfig.types+' layers='+layers+' perType='+perType);
+  addLog('Grid: '+fieldLayout.cols+'x'+fieldLayout.rows);
+  for(var li=0;li<layers;li++){
+    var lt=tiles.filter(function(t){return t.layer===li});
+    var lc=Math.max(1,fieldLayout.cols-li);var lr=Math.max(1,fieldLayout.rows-li);
+    var bl=lt.filter(function(t){return isBlocked(t)}).length;
+    addLog('Layer '+li+': '+lc+'x'+lr+'='+lc*lr+' cells, '+lt.length+' tiles, '+bl+' blocked');
+  }
 }
 
-// Calculate field layout ONCE at level start
-// Pyramid: layer 0 = baseCols×baseRows, layer 1 = (baseCols-1)×(baseRows-1), etc.
-// Each layer is offset by half a cell in X and half a cell in Y (brick pattern)
-function calcFieldLayout(){
-  var totalTiles=levelConfig.types*levelConfig.perType;
-  // Ensure perType is multiple of 3 (needed for triples!)
-  var effectivePerType=levelConfig.perType;
-  if(effectivePerType%3!==0)effectivePerType=Math.ceil(effectivePerType/3)*3;
-  totalTiles=levelConfig.types*effectivePerType;
-  // Limit layers so top layer has at least 3x3=9 cells
-  var layers=levelConfig.layers;
-  var maxLayers=1;
-  for(var ml=1;ml<=10;ml++){
-    var topCols=Math.max(1,3-ml+1); // base 3 cols
-    if(ml<=3)maxLayers=ml; // up to 3 layers with 3+ cols top
-    else break;
-  }
-  // More precise: top layer must have >=9 cells AND >=3 different types possible
-  for(var ml=1;ml<=10;ml++){
-    var tc=Math.max(1,3-ml+1);var tr=Math.max(1,3-ml+1);
-    if(tc*tr>=9 && tc>=3)maxLayers=ml; else break;
-  }
-  if(layers>maxLayers)layers=maxLayers;
-  levelConfig.effectivePerType=effectivePerType;
-  levelConfig.effectiveLayers=layers;
-  var gapRatioX=0.4;var gapRatioY=0.3;
-  var ft=TOP_H+BBAR_H;
-  var pad=10; // padding from edges
-  
-  // Find bestCols/bestRows where ALL tiles fit as pyramid AND fit on screen
-  var bestCols=0,bestRows=0,bestTileSize=0;
-  
-  for(var tryCols=3;tryCols<=12;tryCols++){
-    for(var tryRows=3;tryRows<=12;tryRows++){
-      // Check capacity
-      var cap=0;
-      for(var l=0;l<layers;l++){
-        cap+=Math.max(1,tryCols-l)*Math.max(1,tryRows-l);
-      }
-      if(cap<totalTiles)continue;
-      
-      // Calculate tile size that fits this grid on screen
-      var totalFX=tryCols+(layers-1)*0.5;
-      var totalFY=tryRows+(layers-1)*0.5;
-      var tw=(SW-2*pad)/(totalFX*(1+gapRatioX));
-      var th=(FIELD_H-2*pad)/(totalFY*(1+gapRatioY));
-      var tileSize=Math.min(tw,th/1.4);
-      if(tileSize<8)continue; // too small
-      
-      // Prefer grid that gives biggest tiles (most readable)
-      if(tileSize>bestTileSize){
-        bestTileSize=tileSize;
-        bestCols=tryCols;
-        bestRows=tryRows;
-      }
-    }
-  }
-  
-  if(bestCols===0){bestCols=5;bestRows=4;bestTileSize=30} // fallback
-  
-  // Set tile sizes
-  TW=bestTileSize;
-  TH=TW*1.4;
-  
-  // Recalculate slot sizes
-  SLOT_W=(SW-20)/8-3;
-  SLOT_H=SLOT_W*1.4;
-  if(SLOT_H>SHELF_H-8){SLOT_H=SHELF_H-8;SLOT_W=SLOT_H/1.4}
-  
-  var gapX=TW*gapRatioX;
-  var gapY=TH*gapRatioY;
-  var halfCellX=(TW+gapX)/2;
-  var halfCellY=(TH+gapY)/2;
-  
-  // Total bounding box
-  var baseW=bestCols*TW+(bestCols-1)*gapX;
-  var baseH=bestRows*TH+(bestRows-1)*gapY;
-  var totalW=baseW+(layers-1)*halfCellX;
-  var totalH=baseH+(layers-1)*halfCellY;
-  
-  // Center in field area — GUARANTEE all tiles between panels
-  var offX=(SW-totalW)/2;
-  var offY=ft+(FIELD_H-totalH)/2;
-  // Clamp to field boundaries
-  if(offY<ft)offY=ft;
-  if(offY+totalH>ft+FIELD_H)offY=ft+FIELD_H-totalH;
-  if(offX<0)offX=0;
-  if(offX+totalW>SW)offX=SW-totalW;
-  
-  fieldLayout.cols=bestCols;
-  fieldLayout.rows=bestRows;
-  fieldLayout.offX=offX;fieldLayout.offY=offY;
-  fieldLayout.gapX=gapX;fieldLayout.gapY=gapY;
-  fieldLayout.halfCellX=halfCellX;
-  fieldLayout.halfCellY=halfCellY;
-}
-
-// Get pixel position of a tile
-// Layer 0: starts at offX, offY
-// Layer 1: shifted right by halfCellX, down by halfCellY (from base start)
-// Layer 2: shifted by 2*halfCellX, 2*halfCellY, etc.
-// This creates a pyramid where each layer is offset and smaller
-function getTilePos(tile){
-  var L=fieldLayout;
-  var layerCols=Math.max(1,L.cols-tile.layer);
-  // Each layer starts offset by halfCell from the base layer's start
-  var layerOffX=L.offX+tile.layer*L.halfCellX;
-  var layerOffY=L.offY+tile.layer*L.halfCellY;
-  
-  var x=layerOffX+tile.col*(TW+L.gapX);
-  var y=layerOffY+tile.row*(TH+L.gapY);
-  return{x:x,y:y};
-}
-
-// A tile is blocked if any tile in a HIGHER layer overlaps it visually
-function isBlocked(tile){
-  for(var i=0;i<tiles.length;i++){
-    var t=tiles[i];
-    if(t===tile||t.removed||t.layer<=tile.layer)continue;
-    // Get positions
-    var tp=getTilePos(t);
-    var myp=getTilePos(tile);
-    // Check visual overlap (bounding box intersection)
-    if(tp.x<myp.x+TW && tp.x+TW>myp.x && tp.y<myp.y+TH && tp.y+TH>myp.y){
-      return true;
-    }
-  }
-  return false;
-}
-
-function checkTriple(){var before=shelfSlots.map(function(s){return s?s.flying?'F'+s.type:'P'+s.type:'_'}).join(',');
+function checkTriple(){
   for(var t=0;t<10;t++){
     var placed=shelfSlots.filter(function(s){return s&&!s.flying&&s.sprite&&s.type===t});
     if(placed.length>=3){
       var rm=placed.slice(0,3);
+      addLog('TRIPLE! type='+t);
       rm.forEach(function(s){
         var idx=shelfSlots.indexOf(s);shelfSlots[idx]=null;
         if(s.sprite&&s.sprite.parent)s.sprite.parent.removeChild(s.sprite);
       });
-      animateTripleMatch(rm.map(function(s){return s.sprite}),function(){
-        rebuildShelfVisuals();checkWin();
-      });
-      addLog('TRIPLE! type='+t+' | before=['+before+'] after=['+shelfSlots.map(function(s){return s?s.flying?'F'+s.type:'P'+s.type:'_'}).join(',')+']');score+=30;updateScoreText();return true;
+      animateTripleMatch(rm.map(function(s){return s.sprite}),function(){rebuildShelfVisuals();checkWin()});
+      score+=30;updateScoreText();return true;
     }
   }
   return false;
 }
-function checkLose(){var occupied=0;for(var i=0;i<maxShelf;i++){if(shelfSlots[i]!==null)occupied++;}if(occupied>=maxShelf){screenState='lose';drawLose()}}
-function checkWin(){if(tiles.filter(function(t){return!t.removed}).length===0){screenState='win';drawWin()}}
 
-function boosterUndo(){if(boosterCounts.undo<=0||undoStack.length===0)return;boosterCounts.undo--;var last=undoStack.pop();if(!last)return;last.tile.removed=false;var oldSlot=shelfSlots[last.shelfIdx];if(oldSlot&&oldSlot.sprite&&oldSlot.sprite.parent)oldSlot.sprite.parent.removeChild(oldSlot.sprite);shelfSlots[last.shelfIdx]=null;rebuildPlayScreen()}
-function boosterShuffle(){if(boosterCounts.shuffle<=0)return;boosterCounts.shuffle--;var rem=tiles.filter(function(t){return!t.removed});var types=rem.map(function(t){return t.type});for(var i=types.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var tmp=types[i];types[i]=types[j];types[j]=tmp}rem.forEach(function(t,i){t.type=types[i]});rebuildPlayScreen()}
+function checkLose(){
+  var occ=0;for(var i=0;i<maxShelf;i++){if(shelfSlots[i]!==null)occ++}
+  if(occ>=maxShelf){screenState='lose';drawLose()}
+}
+
+function checkWin(){
+  if(tiles.filter(function(t){return!t.removed}).length===0){screenState='win';drawWin()}
+}
+
+function boosterUndo(){
+  if(boosterCounts.undo<=0||undoStack.length===0)return;
+  boosterCounts.undo--;
+  var last=undoStack.pop();if(!last)return;
+  last.tile.removed=false;
+  var sl=shelfSlots[last.shelfIdx];
+  if(sl&&sl.sprite&&sl.sprite.parent)sl.sprite.parent.removeChild(sl.sprite);
+  shelfSlots[last.shelfIdx]=null;
+  rebuildPlayScreen();
+}
+function boosterShuffle(){
+  if(boosterCounts.shuffle<=0)return;boosterCounts.shuffle--;
+  var rem=tiles.filter(function(t){return!t.removed});
+  var types=rem.map(function(t){return t.type});
+  for(var i=types.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var tmp=types[i];types[i]=types[j];types[j]=tmp}
+  rem.forEach(function(t,i){t.type=types[i]});rebuildPlayScreen();
+}
 function boosterExtraSlot(){if(boosterCounts.extraSlot<=0)return;boosterCounts.extraSlot--;maxShelf=8;rebuildPlayScreen()}
-function boosterHint(){if(boosterCounts.hint<=0)return;boosterCounts.hint--;var found=null;for(var t=0;t<10&&!found;t++){if(shelfSlots.filter(function(s){return s&&!s.flying&&s.sprite&&s.type===t}).length>=2)found=tiles.find(function(tile){return!tile.removed&&tile.type===t&&!isBlocked(tile)})}if(!found)found=tiles.find(function(t){return!t.removed&&!isBlocked(t)});if(found&&found.sprite)animatePulse(found.sprite);setTimeout(function(){if(found&&found.sprite)stopPulse(found.sprite)},3000)}
-
-// Log generated level
-  addLog('--- LEVEL '+level+' GENERATED ---');
-  addLog('Config: types='+levelConfig.types+' layers='+effectiveLayers+'(orig:'+levelConfig.layers+') perType='+perType+'(orig:'+levelConfig.perType+') boosters='+levelConfig.boosters);
-  addLog('Grid: cols='+fieldLayout.cols+' rows='+fieldLayout.rows);
-  for(var li=0;li<effectiveLayers;li++){
-    var ltiles=tiles.filter(function(t){return t.layer===li&&!t.removed});
-    var lcols=Math.max(1,fieldLayout.cols-li);
-    addLog('Layer '+li+': '+ltiles.length+' tiles, cols='+lcols+', blocked=['+ltiles.filter(function(t){return isBlocked(t)}).map(function(t){return t.type+'@'+t.col+','+t.row}).join('; ')+']');
-    addLog('  Tiles: '+ltiles.map(function(t){return t.type+'@'+t.col+','+t.row}).join(' | '));
+function boosterHint(){
+  if(boosterCounts.hint<=0)return;boosterCounts.hint--;
+  var found=null;
+  for(var t=0;t<10&&!found;t++){
+    if(shelfSlots.filter(function(s){return s&&!s.flying&&s.sprite&&s.type===t}).length>=2)
+      found=tiles.find(function(tile){return!tile.removed&&tile.type===t&&!isBlocked(tile)});
   }
-  addLog('Shelf: '+maxShelf+' slots');
+  if(!found)found=tiles.find(function(t){return!t.removed&&!isBlocked(t)});
+  if(found&&found.sprite)animatePulse(found.sprite);
+  setTimeout(function(){if(found&&found.sprite)stopPulse(found.sprite)},3000);
+}
 
 // ===== TILE CLICK =====
 function onTileClick(tile){
   if(screenState!=='play')return;
+  if(flyingCount>0)return;
   if(tile.removed)return;
   if(isBlocked(tile)){if(tile.sprite)animateShake(tile.sprite);return}
-  var slotIdx=-1;for(var i=0;i<maxShelf;i++){if(shelfSlots[i]===null){slotIdx=i;break}}
-  if(slotIdx===-1){checkLose();return}
-  // slot already found above, no extra check needed
-  tile.removed=true;
- shelfSlots[slotIdx]={type:tile.type,sprite:null,flying:true};flyingCount++;addLog('CLICK: type='+tile.type+' L'+tile.layer+'@'+tile.col+','+tile.row+' -> slot#'+slotIdx);
-  undoStack.push({tile:tile,shelfIdx:slotIdx});
 
+  // Find free slot
+  var slotIdx=-1;
+  for(var i=0;i<maxShelf;i++){if(shelfSlots[i]===null){slotIdx=i;break}}
+  if(slotIdx===-1){checkLose();return}
+
+  // Reserve slot immediately
+  tile.removed=true;
+  shelfSlots[slotIdx]={type:tile.type,sprite:null,flying:true};
+  flyingCount++;
+  undoStack.push({tile:tile,shelfIdx:slotIdx});
+  addLog('CLICK: type='+tile.type+' L'+tile.layer+'@'+tile.col+','+tile.row+' -> slot#'+slotIdx);
+
+  // Hide tile on field
   var sp=tile.sprite;
   var fromX=sp.x;var fromY=sp.y;
-  sp.visible=false;
-  sp.eventMode='none';
+  sp.visible=false;sp.eventMode='none';
 
-  var fly=makeTileSprite(tile.type,false,SLOT_W,SLOT_H,true);
-  var fieldCX=fromX+TW/2;
-  var fieldCY=fromY+TH/2;
-  fly.x=fieldCX-SLOT_W/2;
-  fly.y=fieldCY-SLOT_H/2;
+  // Create flying sprite
+  var fly=makeTileSprite(tile.type,false,SLOT_W,SLOT_H);
+  var fieldCX=fromX+TW/2;var fieldCY=fromY+TH/2;
+  fly.x=fieldCX-SLOT_W/2;fly.y=fieldCY-SLOT_H/2;
   fly.scale.set(TW/SLOT_W,TH/SLOT_H);
   flyLayer.addChild(fly);
 
+  // Target position
   var shelfStartX=(SW-maxShelf*(SLOT_W+3))/2;
   var targetX=shelfStartX+slotIdx*(SLOT_W+3);
   var targetY=SH-SHELF_H+(SHELF_H-SLOT_H)/2;
-  var targetCX=targetX+SLOT_W/2;
-  var targetCY=targetY+SLOT_H/2;
+  var targetCX=targetX+SLOT_W/2;var targetCY=targetY+SLOT_H/2;
 
+  // Animate
   var dur=300;var s=performance.now();
-  var sx0=TW/SLOT_W,sy0=TH/SLOT_H;var sx1=1,sy1=1;
-
+  var sx0=TW/SLOT_W,sy0=TH/SLOT_H;
   function flyTick(){
     var t=Math.min((performance.now()-s)/dur,1);
     var e=easeOutCubic(t);
-    var csx=sx0+(sx1-sx0)*e;
-    var csy=sy0+(sy1-sy0)*e;
+    var csx=sx0+(1-sx0)*e;var csy=sy0+(1-sy0)*e;
     fly.scale.set(csx,csy);
-    var cx=fieldCX+(targetCX-fieldCX)*e;
-    var cy=fieldCY+(targetCY-fieldCY)*e;
-    fly.x=cx-(SLOT_W*csx)/2;
-    fly.y=cy-(SLOT_H*csy)/2;
-    if(t<1)requestAnimationFrame(flyTick);
-    else{
-      shelfSlots[slotIdx]={type:fly._tileType,sprite:fly,flying:false};flyingCount--;addLog('LAND: type='+fly._tileType+' slot#'+slotIdx+' | shelf=['+shelfSlots.map(function(s){return s?s.flying?'F'+s.type:'P'+s.type:'_'}).join(',')+']');
+    var cx=fieldCX+(targetCX-fieldCX)*e;var cy=fieldCY+(targetCY-fieldCY)*e;
+    fly.x=cx-(SLOT_W*csx)/2;fly.y=cy-(SLOT_H*csy)/2;
+    if(t<1){requestAnimationFrame(flyTick);return}
 
-      fly.x=targetX;fly.y=targetY;
-      fly.scale.set(1,1);
-      shelfContainer.addChild(fly);
-      flyLayer.removeChild(fly);
-      updateBlockedStates();
-      checkTriple();
-      setTimeout(function(){checkLose()},350);
-    }
+    // Landing
+    var slot=shelfSlots[slotIdx];
+    if(slot&&slot.flying){slot.sprite=fly;slot.flying=false}
+    fly.x=targetX;fly.y=targetY;fly.scale.set(1,1);
+    shelfContainer.addChild(fly);flyLayer.removeChild(fly);
+    flyingCount--;
+
+    addLog('LAND: type='+tile.type+' slot#'+slotIdx+' shelf=['+shelfSlots.map(function(s){return s?s.flying?'F'+s.type:'P'+s.type:'_'}).join(',')+']');
+
+    updateBlockedStates();
+    // Log blocked state
+    var blockedList=tiles.filter(function(t){return!t.removed&&isBlocked(t)});
+    var freeCount=tiles.filter(function(t){return!t.removed&&!isBlocked(t)}).length;
+    var remaining=tiles.filter(function(t){return!t.removed}).length;
+    addLog('BLOCKED: '+blockedList.length+'/'+remaining+' | FREE: '+freeCount);
+    if(freeCount===0&&remaining>0)addLog('!!! STUCK - NO FREE TILES !!!');
+
+    checkTriple();
+    setTimeout(function(){checkLose()},200);
   }
   requestAnimationFrame(flyTick);
 }
 
 function updateBlockedStates(){
-  if(!fieldContainer)return;
   var changed=true;var passes=0;
   while(changed&&passes<10){
     changed=false;passes++;
@@ -475,76 +457,54 @@ function updateBlockedStates(){
       if(tile.removed||!tile.sprite)return;
       var blocked=isBlocked(tile);
       if(tile.sprite._blocked!==blocked){
-        tile.sprite._blocked=blocked;
-        tile.sprite._darkened=blocked;
-        // Redraw the tile with correct darkness
-        var sp=tile.sprite;
-        var g=sp.getChildAt(0); // graphics child
+        tile.sprite._blocked=blocked;changed=true;
+        var g=tile.sprite.getChildAt(0);var rad=TW*0.1;
         g.clear();
-        var rad=TW*0.1;
-        var bg=blocked?0xE8DCC8:TILE_BG;
-        var brd=blocked?0xB09860:TILE_BORDER;
-        var brdAlpha=blocked?0.5:0.7;
-        g.beginFill(TILE_SHADOW,0.15);g.drawRoundedRect(2,2,TW,TH,rad);g.endFill();
+        var bg=blocked?BLOCKED_BG:TILE_BG;var brd=blocked?BLOCKED_BORDER:TILE_BORDER;var brdA=blocked?0.5:0.7;
+        g.beginFill(0x000000,0.15);g.drawRoundedRect(2,2,TW,TH,rad);g.endFill();
         g.beginFill(bg);g.drawRoundedRect(0,0,TW,TH,rad);g.endFill();
-        g.lineStyle(2,brd,brdAlpha);g.drawRoundedRect(0,0,TW,TH,rad);g.endFill();
+        g.lineStyle(2,brd,brdA);g.drawRoundedRect(0,0,TW,TH,rad);g.endFill();
         // Update emoji alpha
-        if(sp.children.length>1){
-          sp.children[1].alpha=blocked?0.5:1;
-        }
-        if(blocked){
-          tile.sprite.eventMode='none';
-          tile.sprite.cursor='default';
-        }else{
-          tile.sprite.eventMode='static';
-          tile.sprite.cursor='pointer';
+        if(tile.sprite.children.length>1)tile.sprite.children[1].alpha=blocked?0.5:1;
+        if(blocked){tile.sprite.eventMode='none';tile.sprite.cursor='default'}
+        else{
+          tile.sprite.eventMode='static';tile.sprite.cursor='pointer';
           if(!tile.sprite._hasClick){
             tile.sprite._hasClick=true;
-            (function(t){
-              tile.sprite.on('pointertap',function(){onTileClick(t)});
-            })(tile);
+            (function(tl){tile.sprite.on('pointertap',function(){onTileClick(tl)})})(tile);
           }
         }
-        changed=true;
       }
     });
   }
 }
 
-// Build field tiles using SAVED layout (no recalculation)
+// ===== BUILD FIELD =====
 function buildFieldTiles(){
   if(!fieldContainer)return;
   fieldContainer.removeChildren();
   var ft=TOP_H+BBAR_H;
-  var fbg=new PIXI.Graphics();fbg.beginFill(0xF5F0E8);fbg.drawRect(0,0,SW,FIELD_H);fbg.endFill();
-  fbg.y=ft;fieldContainer.addChild(fbg);
+  var fbg=new PIXI.Graphics();fbg.beginFill(0xF5F0E8);fbg.drawRect(0,0,SW,FIELD_H);fbg.endFill();fbg.y=ft;fieldContainer.addChild(fbg);
 
-  // Sort tiles by layer (draw lower layers first) then by row
-  var sorted=tiles.filter(function(t){return!t.removed}).slice().sort(function(a,b){
-    if(a.layer!==b.layer)return a.layer-b.layer;
-    return a.row-b.row;
-  });
-
+  // Sort by layer then row for proper z-order
+  var sorted=tiles.filter(function(t){return!t.removed}).slice().sort(function(a,b){return a.layer!==b.layer?a.layer-b.layer:a.row-b.row});
   sorted.forEach(function(tile){
     var blocked=isBlocked(tile);
-    var sp=makeTileSprite(tile.type,blocked,TW,TH,false);
-    var pos=getTilePos(tile);
-    sp.x=pos.x;sp.y=pos.y;
+    var sp=makeTileSprite(tile.type,blocked,TW,TH);
+    var pos=getTilePos(tile);sp.x=pos.x;sp.y=pos.y;
     if(!blocked){
-      sp.eventMode='static';
-      sp.cursor='pointer';
-      sp._hasClick=true;
-      (function(t){
-        sp.on('pointertap',function(){onTileClick(t)});
-      })(tile);
+      sp.eventMode='static';sp.cursor='pointer';sp._hasClick=true;
+      (function(tl){sp.on('pointertap',function(){onTileClick(tl)})})(tile);
     }
-    tile.sprite=sp;
-    fieldContainer.addChild(sp);
+    tile.sprite=sp;fieldContainer.addChild(sp);
   });
 }
 
 // ===== SCREENS =====
-function clearAll(){stage.removeChildren();fieldContainer=null;shelfContainer=null;topBar=null;flyLayer=null;confettiParticles.forEach(function(p){p.parent&&p.parent.removeChild(p)});confettiParticles=[]}
+function clearAll(){
+  stage.removeChildren();fieldContainer=null;shelfContainer=null;topBar=null;flyLayer=null;
+  confettiParticles.forEach(function(p){p.parent&&p.parent.removeChild(p)});confettiParticles=[];
+}
 
 function drawMenu(){
   clearAll();screenState='menu';
@@ -558,33 +518,10 @@ function drawMenu(){
 }
 
 function startGame(){
-  clearAll();screenState='play';score=0;maxShelf=7;undoStack=[];shelfSlots=[];
-  for(var i=0;i<maxShelf;i++)shelfSlots.push(null);
+  clearAll();screenState='play';score=0;maxShelf=7;undoStack=[];flyingCount=0;
+  shelfSlots=[];for(var i=0;i<8;i++)shelfSlots.push(null);
   boosterCounts={undo:levelConfig.boosters,shuffle:levelConfig.boosters,extraSlot:levelConfig.boosters,hint:levelConfig.boosters};
-  calcSizes();
-
-function addLog(msg){gameLog.push(msg);try{localStorage.setItem('tileMatchLog',JSON.stringify(gameLog))}catch(e){}}
-function getLogText(){
-  var header='=== Tile Match Log ===\nLevel: '+level+' | Types: '+levelConfig.types+' | Layers: '+levelConfig.layers+' | PerType: '+levelConfig.perType+'\n';
-  header+='Grid: '+fieldLayout.cols+'x'+fieldLayout.rows+' | MaxShelf: '+maxShelf+'\n';
-  header+='Screen: '+SW+'x'+SH+' | TW: '+Math.round(TW)+' TH: '+Math.round(TH)+'\n\n';
-  return header+gameLog.join('\n');
-}
-function showLogPanel(){
-  var existing=document.getElementById('log-panel');
-  if(existing){existing.style.display=existing.style.display==='none'?'block':'none';return}
-  var div=document.createElement('div');div.id='log-panel';
-  div.style.cssText='position:fixed;top:10%;left:5%;width:90%;height:75%;background:rgba(20,20,20,0.95);border-radius:12px;padding:16px;z-index:200;display:flex;flex-direction:column;';
-  div.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="color:#fff;font-size:16px;font-weight:bold">📋 Game Log</span><div><button id="copyLogBtn" style="background:#27AE60;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold;margin-right:8px">📋 Копировать</button><button id="closeLogBtn" style="background:#C0392B;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold">✕ Закрыть</button></div></div><textarea id="logText" style="flex:1;width:100%;background:#111;color:#0f0;border:1px solid #333;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;resize:none" readonly></textarea>';
-  document.body.appendChild(div);
-  document.getElementById('logText').value=getLogText();
-  document.getElementById('copyLogBtn').onclick=function(){var ta=document.getElementById('logText');ta.select();document.execCommand('copy');navigator.clipboard&&navigator.clipboard.writeText(ta.value);document.getElementById('copyLogBtn').textContent='✅ Скопировано!';setTimeout(function(){document.getElementById('copyLogBtn').textContent='📋 Копировать'},2000)};
-  document.getElementById('closeLogBtn').onclick=function(){div.style.display='none'};
-}
-
-  calcFieldLayout();
-  generateTiles();
-  rebuildPlayScreen();
+  calcSizes();calcFieldLayout();generateTiles();rebuildPlayScreen();
 }
 
 function rebuildPlayScreen(){
@@ -595,62 +532,52 @@ function rebuildPlayScreen(){
   topBar=new PIXI.Container();topBar.zIndex=5;
   stage.addChild(fieldContainer);stage.addChild(shelfContainer);stage.addChild(flyLayer);stage.addChild(topBar);
 
+  // Top bar
   topBar.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x1A1A2E,0.92);g.drawRect(0,0,SW,TOP_H);g.endFill();return g})());
   var st=new PIXI.Text('⭐ '+score,{fontSize:Math.min(SW*0.04,16),fill:0xF1C40F,fontWeight:'bold'});st.x=SW/2;st.y=TOP_H/2;st.anchor.set(0.5);st._isScore=true;topBar.addChild(st);
   var btnH=TOP_H*0.7;
+  topBar.addChild(makeButton('📋',0x8E44AD,btnH,btnH,function(){showLogPanel()}));topBar.children[topBar.children.length-1].x=6;topBar.children[topBar.children.length-1].y=(TOP_H-btnH)/2;
+  topBar.addChild(makeButton('🔧',0x555,btnH,btnH,function(){toggleEditor()}));topBar.children[topBar.children.length-1].x=6+btnH+4;topBar.children[topBar.children.length-1].y=(TOP_H-btnH)/2;
   topBar.addChild(makeButton('⏸',0x7F8C8D,btnH,btnH,function(){drawMenu()}));topBar.children[topBar.children.length-1].x=SW-btnH-6;topBar.children[topBar.children.length-1].y=(TOP_H-btnH)/2;
-  topBar.addChild(makeButton('🔧',0x555,btnH,btnH,function(){toggleEditor()}));topBar.children[topBar.children.length-1].x=6;topBar.children[topBar.children.length-1].y=(TOP_H-btnH)/2;
- topBar.addChild(makeButton('📋',0x8E44AD,btnH,btnH,function(){showLogPanel()}));topBar.children[topBar.children.length-1].x=6+btnH+4;topBar.children[topBar.children.length-1].y=(TOP_H-btnH)/2;
 
+  // Booster bar
   topBar.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x16213E,0.85);g.drawRect(0,TOP_H,SW,BBAR_H);g.endFill();return g})());
   var bbw=Math.min(SW*0.22,80);var bbh=BBAR_H-8;var startX=(SW-4*bbw-3*4)/2;
   [{text:'↩'+boosterCounts.undo,color:0x8E44AD,fn:boosterUndo},{text:'🔀'+boosterCounts.shuffle,color:0x2980B9,fn:boosterShuffle},{text:'+1('+boosterCounts.extraSlot+')',color:0x27AE60,fn:boosterExtraSlot},{text:'💡'+boosterCounts.hint,color:0xE67E22,fn:boosterHint}].forEach(function(b,i){
     var btn=makeButton(b.text,b.color,bbw,bbh,b.fn);btn.x=startX+i*(bbw+4);btn.y=TOP_H+4;topBar.addChild(btn);
   });
 
+  // Field
   buildFieldTiles();
 
+  // Shelf
   shelfContainer.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x8B6F47);g.drawRect(0,SH-SHELF_H,SW,SHELF_H);g.endFill();return g})());
   var shelfStartX=(SW-maxShelf*(SLOT_W+3))/2;
   for(var i=0;i<maxShelf;i++){var sl=makeSlotSprite();sl.x=shelfStartX+i*(SLOT_W+3);sl.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2;shelfContainer.addChild(sl)}
-  shelfSlots.forEach(function(item,idx){
-    if(!item)return;
-    item.x=shelfStartX+idx*(SLOT_W+3);item.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2;item.scale.set(1);
-    shelfContainer.addChild(item);
+  shelfSlots.forEach(function(slot,idx){
+    if(!slot||!slot.sprite)return;
+    slot.sprite.x=shelfStartX+idx*(SLOT_W+3);slot.sprite.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2;slot.sprite.scale.set(1);
+    shelfContainer.addChild(slot.sprite);
   });
 }
 
-function rebuildShelfVisuals(){var shelfStartX=(SW-maxShelf*(SLOT_W+3))/2;shelfSlots.forEach(function(slot,idx){if(!slot||!slot.sprite)return;slot.sprite.x=shelfStartX+idx*(SLOT_W+3);slot.sprite.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2})}
-function updateScoreText(){if(!topBar)return;topBar.children.forEach(function(c){if(c._isScore)c.text='⭐ '+score})}
+function rebuildShelfVisuals(){
+  var shelfStartX=(SW-maxShelf*(SLOT_W+3))/2;
+  shelfSlots.forEach(function(slot,idx){
+    if(!slot||!slot.sprite)return;
+    slot.sprite.x=shelfStartX+idx*(SLOT_W+3);slot.sprite.y=SH-SHELF_H+(SHELF_H-SLOT_H)/2;
+  });
+}
+function updateScoreText(){if(!topBar)return;topBar.children.forEach(function(c){if(c._isScore)c.text='\u2b50 '+score})}
 
 function drawWin(){
   clearAll();screenState='win';
   var c=new PIXI.Container();c.zIndex=0;stage.addChild(c);
   c.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x000000,0.6);g.drawRect(0,0,SW,SH);g.endFill();return g})());
-  c.addChild((function(){var t=new PIXI.Text('🎉 Победа!',{fontSize:Math.min(SW*0.12,48),fill:0x2ECC71,fontWeight:'bold'});t.anchor.set(0.5);t.x=SW/2;t.y=SH*0.3;return t})());
+  c.addChild((function(){var t=new PIXI.Text('\ud83c\udf89 Победа!',{fontSize:Math.min(SW*0.12,48),fill:0x2ECC71,fontWeight:'bold'});t.anchor.set(0.5);t.x=SW/2;t.y=SH*0.3;return t})());
   c.addChild((function(){var s=new PIXI.Text('Счёт: '+score,{fontSize:Math.min(SW*0.07,28),fill:0xF1C40F,fontWeight:'bold'});s.anchor.set(0.5);s.x=SW/2;s.y=SH*0.42;return s})());
   var bw=SW*0.5;var bh=SW*0.1;
-  c.addChild(makeButton('Следующий уровень ▶',0x27AE60,bw,bh,function(){level++;levelConfig.types=Math.min(levelConfig.types+1,15);levelConfig.layers=Math.min(levelConfig.layers+1,3);calcSizes();
-
-function addLog(msg){gameLog.push(msg);try{localStorage.setItem('tileMatchLog',JSON.stringify(gameLog))}catch(e){}}
-function getLogText(){
-  var header='=== Tile Match Log ===\nLevel: '+level+' | Types: '+levelConfig.types+' | Layers: '+levelConfig.layers+' | PerType: '+levelConfig.perType+'\n';
-  header+='Grid: '+fieldLayout.cols+'x'+fieldLayout.rows+' | MaxShelf: '+maxShelf+'\n';
-  header+='Screen: '+SW+'x'+SH+' | TW: '+Math.round(TW)+' TH: '+Math.round(TH)+'\n\n';
-  return header+gameLog.join('\n');
-}
-function showLogPanel(){
-  var existing=document.getElementById('log-panel');
-  if(existing){existing.style.display=existing.style.display==='none'?'block':'none';return}
-  var div=document.createElement('div');div.id='log-panel';
-  div.style.cssText='position:fixed;top:10%;left:5%;width:90%;height:75%;background:rgba(20,20,20,0.95);border-radius:12px;padding:16px;z-index:200;display:flex;flex-direction:column;';
-  div.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="color:#fff;font-size:16px;font-weight:bold">📋 Game Log</span><div><button id="copyLogBtn" style="background:#27AE60;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold;margin-right:8px">📋 Копировать</button><button id="closeLogBtn" style="background:#C0392B;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold">✕ Закрыть</button></div></div><textarea id="logText" style="flex:1;width:100%;background:#111;color:#0f0;border:1px solid #333;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;resize:none" readonly></textarea>';
-  document.body.appendChild(div);
-  document.getElementById('logText').value=getLogText();
-  document.getElementById('copyLogBtn').onclick=function(){var ta=document.getElementById('logText');ta.select();document.execCommand('copy');navigator.clipboard&&navigator.clipboard.writeText(ta.value);document.getElementById('copyLogBtn').textContent='✅ Скопировано!';setTimeout(function(){document.getElementById('copyLogBtn').textContent='📋 Копировать'},2000)};
-  document.getElementById('closeLogBtn').onclick=function(){div.style.display='none'};
-}
-startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55;
+  c.addChild(makeButton('Следующий ▶',0x27AE60,bw,bh,function(){level++;levelConfig.types=Math.min(levelConfig.types+1,15);levelConfig.layers=Math.min(levelConfig.layers+1,3);startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55;
   c.addChild(makeButton('🏠 Меню',0x2980B9,bw,bh,function(){drawMenu()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55+bh*1.4;
   spawnConfetti();
 }
@@ -663,7 +590,7 @@ function drawLose(){
   c.addChild((function(){var t=new PIXI.Text('😢 Полка полна!',{fontSize:Math.min(SW*0.1,42),fill:0xE74C3C,fontWeight:'bold'});t.anchor.set(0.5);t.x=SW/2;t.y=SH*0.28;return t})());
   var bw=SW*0.5;var bh=SW*0.1;
   c.addChild(makeButton('🔄 Заново',0xE67E22,bw,bh,function(){startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.45;
-  c.addChild(makeButton('↩ Отменить ход',0x8E44AD,bw,bh,function(){boosterCounts.undo=Math.max(boosterCounts.undo,1);boosterUndo();if(shelfSlots.filter(function(s){return s!==null}).length<maxShelf)startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55;
+  c.addChild(makeButton('↩ Отменить',0x8E44AD,bw,bh,function(){boosterCounts.undo=Math.max(boosterCounts.undo,1);boosterUndo();startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55;
   c.addChild(makeButton('🏠 Меню',0x2980B9,bw,bh,function(){drawMenu()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.65;
 }
 
