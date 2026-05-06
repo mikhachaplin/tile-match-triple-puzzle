@@ -56,6 +56,7 @@ var boosterCounts={undo:3,shuffle:3,extraSlot:3,hint:3};
 var fieldContainer,shelfContainer,flyLayer,topBar;
 var confettiParticles=[];
 var flyingCount=0;
+var gameLog=[];
 
 // Tile colors — beige/sand background, brown border
 var TILE_BG=0xF5E6C8;   // beige/sand
@@ -86,9 +87,49 @@ function calcSizes(){
 }
 calcSizes();
 
+function addLog(msg){gameLog.push(msg);try{localStorage.setItem('tileMatchLog',JSON.stringify(gameLog))}catch(e){}}
+function getLogText(){
+  var header='=== Tile Match Log ===\nLevel: '+level+' | Types: '+levelConfig.types+' | Layers: '+levelConfig.layers+' | PerType: '+levelConfig.perType+'\n';
+  header+='Grid: '+fieldLayout.cols+'x'+fieldLayout.rows+' | MaxShelf: '+maxShelf+'\n';
+  header+='Screen: '+SW+'x'+SH+' | TW: '+Math.round(TW)+' TH: '+Math.round(TH)+'\n\n';
+  return header+gameLog.join('\n');
+}
+function showLogPanel(){
+  var existing=document.getElementById('log-panel');
+  if(existing){existing.style.display=existing.style.display==='none'?'block':'none';return}
+  var div=document.createElement('div');div.id='log-panel';
+  div.style.cssText='position:fixed;top:10%;left:5%;width:90%;height:75%;background:rgba(20,20,20,0.95);border-radius:12px;padding:16px;z-index:200;display:flex;flex-direction:column;';
+  div.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="color:#fff;font-size:16px;font-weight:bold">📋 Game Log</span><div><button id="copyLogBtn" style="background:#27AE60;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold;margin-right:8px">📋 Копировать</button><button id="closeLogBtn" style="background:#C0392B;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold">✕ Закрыть</button></div></div><textarea id="logText" style="flex:1;width:100%;background:#111;color:#0f0;border:1px solid #333;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;resize:none" readonly></textarea>';
+  document.body.appendChild(div);
+  document.getElementById('logText').value=getLogText();
+  document.getElementById('copyLogBtn').onclick=function(){var ta=document.getElementById('logText');ta.select();document.execCommand('copy');navigator.clipboard&&navigator.clipboard.writeText(ta.value);document.getElementById('copyLogBtn').textContent='✅ Скопировано!';setTimeout(function(){document.getElementById('copyLogBtn').textContent='📋 Копировать'},2000)};
+  document.getElementById('closeLogBtn').onclick=function(){div.style.display='none'};
+}
+
+
 window.addEventListener('resize',function(){
   app.renderer.resize(window.innerWidth,window.innerHeight);
   calcSizes();
+
+function addLog(msg){gameLog.push(msg);try{localStorage.setItem('tileMatchLog',JSON.stringify(gameLog))}catch(e){}}
+function getLogText(){
+  var header='=== Tile Match Log ===\nLevel: '+level+' | Types: '+levelConfig.types+' | Layers: '+levelConfig.layers+' | PerType: '+levelConfig.perType+'\n';
+  header+='Grid: '+fieldLayout.cols+'x'+fieldLayout.rows+' | MaxShelf: '+maxShelf+'\n';
+  header+='Screen: '+SW+'x'+SH+' | TW: '+Math.round(TW)+' TH: '+Math.round(TH)+'\n\n';
+  return header+gameLog.join('\n');
+}
+function showLogPanel(){
+  var existing=document.getElementById('log-panel');
+  if(existing){existing.style.display=existing.style.display==='none'?'block':'none';return}
+  var div=document.createElement('div');div.id='log-panel';
+  div.style.cssText='position:fixed;top:10%;left:5%;width:90%;height:75%;background:rgba(20,20,20,0.95);border-radius:12px;padding:16px;z-index:200;display:flex;flex-direction:column;';
+  div.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="color:#fff;font-size:16px;font-weight:bold">📋 Game Log</span><div><button id="copyLogBtn" style="background:#27AE60;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold;margin-right:8px">📋 Копировать</button><button id="closeLogBtn" style="background:#C0392B;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold">✕ Закрыть</button></div></div><textarea id="logText" style="flex:1;width:100%;background:#111;color:#0f0;border:1px solid #333;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;resize:none" readonly></textarea>';
+  document.body.appendChild(div);
+  document.getElementById('logText').value=getLogText();
+  document.getElementById('copyLogBtn').onclick=function(){var ta=document.getElementById('logText');ta.select();document.execCommand('copy');navigator.clipboard&&navigator.clipboard.writeText(ta.value);document.getElementById('copyLogBtn').textContent='✅ Скопировано!';setTimeout(function(){document.getElementById('copyLogBtn').textContent='📋 Копировать'},2000)};
+  document.getElementById('closeLogBtn').onclick=function(){div.style.display='none'};
+}
+
   if(screenState==='play')rebuildPlayScreen();
   if(screenState==='menu')drawMenu();
 });
@@ -97,7 +138,27 @@ window.addEventListener('resize',function(){
 function toggleEditor(){var p=document.getElementById('editor-panel');p.style.display=p.style.display==='none'?'block':'none'}
 document.addEventListener('keydown',function(e){if(e.key==='e'||e.key==='E')toggleEditor()});
 ['types','layers','pertype','boosters'].forEach(function(k){var sl=document.getElementById('sl-'+k);sl.oninput=function(){document.getElementById('val-'+k).textContent=this.value}});
-function applyEditor(){levelConfig.types=+document.getElementById('sl-types').value;levelConfig.layers=+document.getElementById('sl-layers').value;levelConfig.perType=+document.getElementById('sl-pertype').value;levelConfig.boosters=+document.getElementById('sl-boosters').value;boosterCounts={undo:levelConfig.boosters,shuffle:levelConfig.boosters,extraSlot:levelConfig.boosters,hint:levelConfig.boosters};toggleEditor();calcSizes();startGame()}
+function applyEditor(){levelConfig.types=+document.getElementById('sl-types').value;levelConfig.layers=+document.getElementById('sl-layers').value;levelConfig.perType=+document.getElementById('sl-pertype').value;levelConfig.boosters=+document.getElementById('sl-boosters').value;boosterCounts={undo:levelConfig.boosters,shuffle:levelConfig.boosters,extraSlot:levelConfig.boosters,hint:levelConfig.boosters};toggleEditor();calcSizes();
+
+function addLog(msg){gameLog.push(msg);try{localStorage.setItem('tileMatchLog',JSON.stringify(gameLog))}catch(e){}}
+function getLogText(){
+  var header='=== Tile Match Log ===\nLevel: '+level+' | Types: '+levelConfig.types+' | Layers: '+levelConfig.layers+' | PerType: '+levelConfig.perType+'\n';
+  header+='Grid: '+fieldLayout.cols+'x'+fieldLayout.rows+' | MaxShelf: '+maxShelf+'\n';
+  header+='Screen: '+SW+'x'+SH+' | TW: '+Math.round(TW)+' TH: '+Math.round(TH)+'\n\n';
+  return header+gameLog.join('\n');
+}
+function showLogPanel(){
+  var existing=document.getElementById('log-panel');
+  if(existing){existing.style.display=existing.style.display==='none'?'block':'none';return}
+  var div=document.createElement('div');div.id='log-panel';
+  div.style.cssText='position:fixed;top:10%;left:5%;width:90%;height:75%;background:rgba(20,20,20,0.95);border-radius:12px;padding:16px;z-index:200;display:flex;flex-direction:column;';
+  div.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="color:#fff;font-size:16px;font-weight:bold">📋 Game Log</span><div><button id="copyLogBtn" style="background:#27AE60;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold;margin-right:8px">📋 Копировать</button><button id="closeLogBtn" style="background:#C0392B;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold">✕ Закрыть</button></div></div><textarea id="logText" style="flex:1;width:100%;background:#111;color:#0f0;border:1px solid #333;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;resize:none" readonly></textarea>';
+  document.body.appendChild(div);
+  document.getElementById('logText').value=getLogText();
+  document.getElementById('copyLogBtn').onclick=function(){var ta=document.getElementById('logText');ta.select();document.execCommand('copy');navigator.clipboard&&navigator.clipboard.writeText(ta.value);document.getElementById('copyLogBtn').textContent='✅ Скопировано!';setTimeout(function(){document.getElementById('copyLogBtn').textContent='📋 Копировать'},2000)};
+  document.getElementById('closeLogBtn').onclick=function(){div.style.display='none'};
+}
+startGame()}
 function exportJSON(){var b=new Blob([JSON.stringify(levelConfig,null,2)],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tile-match-config.json';a.click()}
 function importJSON(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(ev){levelConfig=JSON.parse(ev.target.result);applyEditor()};r.readAsText(f)}
 
@@ -157,7 +218,7 @@ function spawnConfetti(){confettiParticles.forEach(function(p){p.parent&&p.paren
 app.ticker.add(function(){if(screenState==='win')confettiParticles.forEach(function(p){p.x+=p._vx;p.y+=p._vy;p._vy+=0.1;p.rotation+=p._rot;p._alpha-=0.002;p.alpha=Math.max(0,p._alpha);if(p.y>SH+20)p._vy=-Math.abs(p._vy)*0.3})});
 
 // ===== GAME LOGIC =====
-function generateTiles(){
+function generateTiles(){gameLog=[];
   tiles=[];
   var total=levelConfig.types*levelConfig.perType;
   var types=[];for(var t=0;t<levelConfig.types;t++)for(var j=0;j<levelConfig.perType;j++)types.push(t);
@@ -289,7 +350,7 @@ function isBlocked(tile){
   return false;
 }
 
-function checkTriple(){
+function checkTriple(){var before=shelfSlots.map(function(s){return s?s.flying?'F'+s.type:'P'+s.type:'_'}).join(',');
   for(var t=0;t<10;t++){
     var placed=shelfSlots.filter(function(s){return s&&!s.flying&&s.sprite&&s.type===t});
     if(placed.length>=3){
@@ -301,7 +362,7 @@ function checkTriple(){
       animateTripleMatch(rm.map(function(s){return s.sprite}),function(){
         rebuildShelfVisuals();checkWin();
       });
-      score+=30;updateScoreText();return true;
+      addLog('TRIPLE! type='+t+' | before=['+before+'] after=['+shelfSlots.map(function(s){return s?s.flying?'F'+s.type:'P'+s.type:'_'}).join(',')+']');score+=30;updateScoreText();return true;
     }
   }
   return false;
@@ -314,6 +375,18 @@ function boosterShuffle(){if(boosterCounts.shuffle<=0)return;boosterCounts.shuff
 function boosterExtraSlot(){if(boosterCounts.extraSlot<=0)return;boosterCounts.extraSlot--;maxShelf=8;rebuildPlayScreen()}
 function boosterHint(){if(boosterCounts.hint<=0)return;boosterCounts.hint--;var found=null;for(var t=0;t<10&&!found;t++){if(shelfSlots.filter(function(s){return s&&!s.flying&&s.sprite&&s.type===t}).length>=2)found=tiles.find(function(tile){return!tile.removed&&tile.type===t&&!isBlocked(tile)})}if(!found)found=tiles.find(function(t){return!t.removed&&!isBlocked(t)});if(found&&found.sprite)animatePulse(found.sprite);setTimeout(function(){if(found&&found.sprite)stopPulse(found.sprite)},3000)}
 
+// Log generated level
+  addLog('--- LEVEL '+level+' GENERATED ---');
+  addLog('Config: types='+levelConfig.types+' layers='+levelConfig.layers+' perType='+levelConfig.perType+' boosters='+levelConfig.boosters);
+  addLog('Grid: cols='+fieldLayout.cols+' rows='+fieldLayout.rows);
+  for(var li=0;li<levelConfig.layers;li++){
+    var ltiles=tiles.filter(function(t){return t.layer===li&&!t.removed});
+    var lcols=Math.max(1,fieldLayout.cols-li);
+    addLog('Layer '+li+': '+ltiles.length+' tiles, cols='+lcols+', blocked=['+ltiles.filter(function(t){return isBlocked(t)}).map(function(t){return t.type+'@'+t.col+','+t.row}).join('; ')+']');
+    addLog('  Tiles: '+ltiles.map(function(t){return t.type+'@'+t.col+','+t.row}).join(' | '));
+  }
+  addLog('Shelf: '+maxShelf+' slots');
+
 // ===== TILE CLICK =====
 function onTileClick(tile){
   if(screenState!=='play')return;
@@ -323,7 +396,7 @@ function onTileClick(tile){
   if(slotIdx===-1){checkLose();return}
   // slot already found above, no extra check needed
   tile.removed=true;
- shelfSlots[slotIdx]={type:tile.type,sprite:null,flying:true};flyingCount++;
+ shelfSlots[slotIdx]={type:tile.type,sprite:null,flying:true};flyingCount++;addLog('CLICK: type='+tile.type+' L'+tile.layer+'@'+tile.col+','+tile.row+' -> slot#'+slotIdx);
   undoStack.push({tile:tile,shelfIdx:slotIdx});
 
   var sp=tile.sprite;
@@ -360,7 +433,7 @@ function onTileClick(tile){
     fly.y=cy-(SLOT_H*csy)/2;
     if(t<1)requestAnimationFrame(flyTick);
     else{
-      shelfSlots[slotIdx]={type:fly._tileType,sprite:fly,flying:false};flyingCount--;
+      shelfSlots[slotIdx]={type:fly._tileType,sprite:fly,flying:false};flyingCount--;addLog('LAND: type='+fly._tileType+' slot#'+slotIdx+' | shelf=['+shelfSlots.map(function(s){return s?s.flying?'F'+s.type:'P'+s.type:'_'}).join(',')+']');
 
       fly.x=targetX;fly.y=targetY;
       fly.scale.set(1,1);
@@ -470,6 +543,26 @@ function startGame(){
   for(var i=0;i<maxShelf;i++)shelfSlots.push(null);
   boosterCounts={undo:levelConfig.boosters,shuffle:levelConfig.boosters,extraSlot:levelConfig.boosters,hint:levelConfig.boosters};
   calcSizes();
+
+function addLog(msg){gameLog.push(msg);try{localStorage.setItem('tileMatchLog',JSON.stringify(gameLog))}catch(e){}}
+function getLogText(){
+  var header='=== Tile Match Log ===\nLevel: '+level+' | Types: '+levelConfig.types+' | Layers: '+levelConfig.layers+' | PerType: '+levelConfig.perType+'\n';
+  header+='Grid: '+fieldLayout.cols+'x'+fieldLayout.rows+' | MaxShelf: '+maxShelf+'\n';
+  header+='Screen: '+SW+'x'+SH+' | TW: '+Math.round(TW)+' TH: '+Math.round(TH)+'\n\n';
+  return header+gameLog.join('\n');
+}
+function showLogPanel(){
+  var existing=document.getElementById('log-panel');
+  if(existing){existing.style.display=existing.style.display==='none'?'block':'none';return}
+  var div=document.createElement('div');div.id='log-panel';
+  div.style.cssText='position:fixed;top:10%;left:5%;width:90%;height:75%;background:rgba(20,20,20,0.95);border-radius:12px;padding:16px;z-index:200;display:flex;flex-direction:column;';
+  div.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="color:#fff;font-size:16px;font-weight:bold">📋 Game Log</span><div><button id="copyLogBtn" style="background:#27AE60;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold;margin-right:8px">📋 Копировать</button><button id="closeLogBtn" style="background:#C0392B;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold">✕ Закрыть</button></div></div><textarea id="logText" style="flex:1;width:100%;background:#111;color:#0f0;border:1px solid #333;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;resize:none" readonly></textarea>';
+  document.body.appendChild(div);
+  document.getElementById('logText').value=getLogText();
+  document.getElementById('copyLogBtn').onclick=function(){var ta=document.getElementById('logText');ta.select();document.execCommand('copy');navigator.clipboard&&navigator.clipboard.writeText(ta.value);document.getElementById('copyLogBtn').textContent='✅ Скопировано!';setTimeout(function(){document.getElementById('copyLogBtn').textContent='📋 Копировать'},2000)};
+  document.getElementById('closeLogBtn').onclick=function(){div.style.display='none'};
+}
+
   calcFieldLayout();
   generateTiles();
   rebuildPlayScreen();
@@ -488,6 +581,7 @@ function rebuildPlayScreen(){
   var btnH=TOP_H*0.7;
   topBar.addChild(makeButton('⏸',0x7F8C8D,btnH,btnH,function(){drawMenu()}));topBar.children[topBar.children.length-1].x=SW-btnH-6;topBar.children[topBar.children.length-1].y=(TOP_H-btnH)/2;
   topBar.addChild(makeButton('🔧',0x555,btnH,btnH,function(){toggleEditor()}));topBar.children[topBar.children.length-1].x=6;topBar.children[topBar.children.length-1].y=(TOP_H-btnH)/2;
+ topBar.addChild(makeButton('📋',0x8E44AD,btnH,btnH,function(){showLogPanel()}));topBar.children[topBar.children.length-1].x=6+btnH+4;topBar.children[topBar.children.length-1].y=(TOP_H-btnH)/2;
 
   topBar.addChild((function(){var g=new PIXI.Graphics();g.beginFill(0x16213E,0.85);g.drawRect(0,TOP_H,SW,BBAR_H);g.endFill();return g})());
   var bbw=Math.min(SW*0.22,80);var bbh=BBAR_H-8;var startX=(SW-4*bbw-3*4)/2;
@@ -517,7 +611,27 @@ function drawWin(){
   c.addChild((function(){var t=new PIXI.Text('🎉 Победа!',{fontSize:Math.min(SW*0.12,48),fill:0x2ECC71,fontWeight:'bold'});t.anchor.set(0.5);t.x=SW/2;t.y=SH*0.3;return t})());
   c.addChild((function(){var s=new PIXI.Text('Счёт: '+score,{fontSize:Math.min(SW*0.07,28),fill:0xF1C40F,fontWeight:'bold'});s.anchor.set(0.5);s.x=SW/2;s.y=SH*0.42;return s})());
   var bw=SW*0.5;var bh=SW*0.1;
-  c.addChild(makeButton('Следующий уровень ▶',0x27AE60,bw,bh,function(){level++;levelConfig.types=Math.min(levelConfig.types+1,15);levelConfig.layers=Math.min(levelConfig.layers+1,5);calcSizes();startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55;
+  c.addChild(makeButton('Следующий уровень ▶',0x27AE60,bw,bh,function(){level++;levelConfig.types=Math.min(levelConfig.types+1,15);levelConfig.layers=Math.min(levelConfig.layers+1,5);calcSizes();
+
+function addLog(msg){gameLog.push(msg);try{localStorage.setItem('tileMatchLog',JSON.stringify(gameLog))}catch(e){}}
+function getLogText(){
+  var header='=== Tile Match Log ===\nLevel: '+level+' | Types: '+levelConfig.types+' | Layers: '+levelConfig.layers+' | PerType: '+levelConfig.perType+'\n';
+  header+='Grid: '+fieldLayout.cols+'x'+fieldLayout.rows+' | MaxShelf: '+maxShelf+'\n';
+  header+='Screen: '+SW+'x'+SH+' | TW: '+Math.round(TW)+' TH: '+Math.round(TH)+'\n\n';
+  return header+gameLog.join('\n');
+}
+function showLogPanel(){
+  var existing=document.getElementById('log-panel');
+  if(existing){existing.style.display=existing.style.display==='none'?'block':'none';return}
+  var div=document.createElement('div');div.id='log-panel';
+  div.style.cssText='position:fixed;top:10%;left:5%;width:90%;height:75%;background:rgba(20,20,20,0.95);border-radius:12px;padding:16px;z-index:200;display:flex;flex-direction:column;';
+  div.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="color:#fff;font-size:16px;font-weight:bold">📋 Game Log</span><div><button id="copyLogBtn" style="background:#27AE60;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold;margin-right:8px">📋 Копировать</button><button id="closeLogBtn" style="background:#C0392B;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:bold">✕ Закрыть</button></div></div><textarea id="logText" style="flex:1;width:100%;background:#111;color:#0f0;border:1px solid #333;border-radius:8px;padding:10px;font-family:monospace;font-size:11px;resize:none" readonly></textarea>';
+  document.body.appendChild(div);
+  document.getElementById('logText').value=getLogText();
+  document.getElementById('copyLogBtn').onclick=function(){var ta=document.getElementById('logText');ta.select();document.execCommand('copy');navigator.clipboard&&navigator.clipboard.writeText(ta.value);document.getElementById('copyLogBtn').textContent='✅ Скопировано!';setTimeout(function(){document.getElementById('copyLogBtn').textContent='📋 Копировать'},2000)};
+  document.getElementById('closeLogBtn').onclick=function(){div.style.display='none'};
+}
+startGame()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55;
   c.addChild(makeButton('🏠 Меню',0x2980B9,bw,bh,function(){drawMenu()}));c.children[c.children.length-1].x=(SW-bw)/2;c.children[c.children.length-1].y=SH*0.55+bh*1.4;
   spawnConfetti();
 }
