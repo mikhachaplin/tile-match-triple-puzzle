@@ -55,6 +55,7 @@ var levelConfig={types:8,layers:2,perType:6,boosters:3};
 var boosterCounts={undo:3,shuffle:3,extraSlot:3,hint:3};
 var fieldContainer,shelfContainer,flyLayer,topBar;
 var confettiParticles=[];
+var flyingCount=0;
 
 // Tile colors — beige/sand background, brown border
 var TILE_BG=0xF5E6C8;   // beige/sand
@@ -288,7 +289,7 @@ function isBlocked(tile){
   return false;
 }
 
-function checkTriple(){console.log('CHECK_TRIPLE start, slots:', JSON.stringify(shelfSlots.map(function(s){return s?s.flying?'F'+s.type:'P'+s.type:'_'})));
+function checkTriple(){
   for(var t=0;t<10;t++){
     var placed=shelfSlots.filter(function(s){return s&&!s.flying&&s.sprite&&s.type===t});
     if(placed.length>=3){
@@ -322,7 +323,7 @@ function onTileClick(tile){
   if(slotIdx===-1){checkLose();return}
   // slot already found above, no extra check needed
   tile.removed=true;
- shelfSlots[slotIdx]={type:tile.type,sprite:null,flying:true};
+ shelfSlots[slotIdx]={type:tile.type,sprite:null,flying:true};flyingCount++;
   undoStack.push({tile:tile,shelfIdx:slotIdx});
 
   var sp=tile.sprite;
@@ -359,8 +360,8 @@ function onTileClick(tile){
     fly.y=cy-(SLOT_H*csy)/2;
     if(t<1)requestAnimationFrame(flyTick);
     else{
-      shelfSlots[slotIdx]={type:fly._tileType,sprite:fly,flying:false};
- console.log('LAND: type='+fly._tileType+' -> slot '+slotIdx+' [placed], slots:', JSON.stringify(shelfSlots.map(function(s){return s?s.flying?'F'+s.type:'P'+s.type:'_'})));
+      shelfSlots[slotIdx]={type:fly._tileType,sprite:fly,flying:false};flyingCount--;
+
       fly.x=targetX;fly.y=targetY;
       fly.scale.set(1,1);
       shelfContainer.addChild(fly);
@@ -466,7 +467,7 @@ function drawMenu(){
 
 function startGame(){
   clearAll();screenState='play';score=0;maxShelf=7;undoStack=[];shelfSlots=[];
-  for(var i=0;i<8;i++)shelfSlots.push(null);
+  for(var i=0;i<maxShelf;i++)shelfSlots.push(null);
   boosterCounts={undo:levelConfig.boosters,shuffle:levelConfig.boosters,extraSlot:levelConfig.boosters,hint:levelConfig.boosters};
   calcSizes();
   calcFieldLayout();
