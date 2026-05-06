@@ -288,7 +288,7 @@ function isBlocked(tile){
   return false;
 }
 
-function checkTriple(){
+function checkTriple(){console.log('CHECK_TRIPLE start, slots:', JSON.stringify(shelfSlots.map(function(s){return s?s.flying?'F'+s.type:'P'+s.type:'_'})));
   for(var t=0;t<10;t++){
     var placed=shelfSlots.filter(function(s){return s&&!s.flying&&s.sprite&&s.type===t});
     if(placed.length>=3){
@@ -360,6 +360,7 @@ function onTileClick(tile){
     if(t<1)requestAnimationFrame(flyTick);
     else{
       shelfSlots[slotIdx]={type:fly._tileType,sprite:fly,flying:false};
+ console.log('LAND: type='+fly._tileType+' -> slot '+slotIdx+' [placed], slots:', JSON.stringify(shelfSlots.map(function(s){return s?s.flying?'F'+s.type:'P'+s.type:'_'})));
       fly.x=targetX;fly.y=targetY;
       fly.scale.set(1,1);
       shelfContainer.addChild(fly);
